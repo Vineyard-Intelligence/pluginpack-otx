@@ -3,7 +3,7 @@
   "content_type": "vineyard:pluginpack",
   "name": "AlienVault OTX",
   "version": "1.0.0",
-  "description": "Pulls the OTX threat reports (\"pulses\") that name a selected IP, domain, URL, file hash or CVE, and stages each as a campaign with the ATT&CK techniques, malware families and actor it records. Keyless, no server.",
+  "description": "Pulls the OTX threat reports (\"pulses\") that name a selected IP, domain, URL, file hash or CVE, and stages each as a campaign with the ATT&CK techniques, malware families and actor it records. Runs without an API key; an optional free key removes the anonymous rate limit.",
   "author": {
     "name": "VINEYARD",
     "url": "https://vineyard.run"
@@ -34,7 +34,7 @@
       "content_type": "vineyard:plugin",
       "name": "OTX Pulses",
       "version": "1.0.0",
-      "description": "Fetches the AlienVault OTX reports (\"pulses\") that name each selected IP, domain, URL, file hash or CVE, and stages the substantial ones as campaigns — with their ATT&CK techniques, malware families and named adversary. Keyless: measured to return identical results with and without an API key. Community-published pulses are claims, not observations; the run drops scratch pulses and bulk feed dumps and says how many it dropped.",
+      "description": "Fetches the AlienVault OTX reports (\"pulses\") that name each selected IP, domain, URL, file hash or CVE, and stages the substantial ones as campaigns — with their ATT&CK techniques, malware families and named adversary. Runs without an API key: a key returns the same pulses, it only removes the anonymous rate limit, so add one for anything bigger than a handful of nodes. Community-published pulses are claims, not observations; the run drops scratch pulses and bulk feed dumps and says how many it dropped.",
       "icon": "radar",
       "license": "Apache-2.0",
       "platforms": {
@@ -117,6 +117,16 @@
           "node:read",
           "node:create",
           "edge:create"
+        ],
+        "config": [
+          {
+            "key": "api_key",
+            "label": "OTX API key (optional — removes the anonymous rate limit)",
+            "type": "string",
+            "secret": true,
+            "scope": "user",
+            "optional": true
+          }
         ],
         "network": [
           {

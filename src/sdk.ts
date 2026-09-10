@@ -325,6 +325,16 @@ export interface MockContextOptions {
     nodes?: GraphNode[];
     edges?: GraphEdge[];
     params?: Record<string, unknown>;
+    /**
+     * Values the ANALYST configured, as `ctx.config` sees them.
+     *
+     * Missing here until a pack needed to prove it sends an API key only when one is set. Four
+     * shipped packs read ctx.config (github, shodan, virustotal, otx) and none of them could test
+     * that path through this harness: without it every mock run looks like an unconfigured install,
+     * so "the key header is attached" and "the key header is never invented" were both unreachable.
+     * Mock values only — a real secret never comes near this file.
+     */
+    config?: Record<string, string | number | boolean>;
     selection?: string[];
     grantedScopes?: ManifestScopes;
     projectId?: string;
@@ -482,6 +492,7 @@ export function createMockContext(opts: MockContextOptions = {}): MockContext {
         },
         input: { selection: opts.selection ?? [] },
         params: opts.params ?? {},
+        config: opts.config ?? {},
         graph: graphAny as HostContext['graph'],
         net:
             opts.netHandler || opts.probeHandler

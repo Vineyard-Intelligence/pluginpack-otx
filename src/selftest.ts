@@ -47,6 +47,22 @@ async function run(
     return { result, ctx, calls };
 }
 
+async function runConfig(config: Record<string, string>, nodes: Array<{ id: string; type: string; data: Record<string, unknown> }>) {
+    const calls: Call[] = [];
+    const ctx = createMockContext({
+        selection: nodes.map((n) => n.id),
+        nodes,
+        grantedScopes: GRANTS as never,
+        config,
+        netHandler: async (url: string, init?: { headers?: Record<string, string> }) => {
+            calls.push({ url, headers: init?.headers ?? {} });
+            return { status: 200, body: JSON.stringify(FIXTURE), headers: { 'content-type': 'application/json' } } as never;
+        },
+    }) as MockContext;
+    await otxPulses.run(ctx);
+    return { ctx, calls };
+}
+
 const ip = (id: string, addr: string) => ({ id, type: 'infrastructure.ip_address', data: { ip_address: addr } });
 const typed = (ctx: MockContext, t: string) => ctx.mock.createdNodes.filter((n) => n.type === t);
 
@@ -134,6 +150,9 @@ const typed = (ctx: MockContext, t: string) => ctx.mock.createdNodes.filter((n) 
     const cases: Array<[Record<string, unknown>, string, RegExp]> = [
         [{ ip_address: '2001:db8::1' }, 'infrastructure.ip_address', /\/IPv6\/2001%3Adb8%3A%3A1\/general$/],
         [{ domain_name: 'evil.test' }, 'infrastructure.domain', /\/domain\/evil\.test\/general$/],
+        // Three labels or more: hostname is tried FIRST, because OTX indexes the two separately and
+        // a subdomain asked as a domain comes back empty.
+        [{ domain_name: 'cdn.evil.test' }, 'infrastructure.domain', /\/hostname\/cdn\.evil\.test\/general$/],
         [{ url: 'http://evil.test/a?b=1' }, 'web.url', /\/url\/http%3A%2F%2Fevil\.test%2Fa%3Fb%3D1\/general$/],
         [{ cve_id: 'CVE-2021-44228' }, 'threat.vulnerability', /\/cve\/CVE-2021-44228\/general$/],
         [{ sha256: 'a'.repeat(64), md5: 'b'.repeat(32) }, 'threat.file_hash', new RegExp(`/file/${'a'.repeat(64)}/general$`)],
@@ -149,6 +168,65 @@ const typed = (ctx: MockContext, t: string) => ctx.mock.createdNodes.filter((n) 
     const other = await run([{ id: 'n0', type: 'identity.person', data: { full_name: 'nobody' } }]);
     check(other.calls.length === 0, 'a type OTX has no endpoint for costs no request');
     check(/no lookup for/.test(String((other.result as { summary?: string }).summary)), 'and is counted, not silently dropped');
+}
+
+// ── 7. DOMAIN AND HOSTNAME ARE DIFFERENT NAMESPACES IN OTX ─────────────────────────────────────
+// Measured 2026-09-10: mail.ru has 50 pulses under /domain/ and 0 under /hostname/;
+// cdn.jsdelivr.net has 0 under /domain/ and 50 under /hostname/. One infrastructure.domain node
+// can be either, so asking only one endpoint returns an empty result that reads exactly like "OTX
+// knows nothing" — every subdomain in a graph would have come back clean.
+{
+    // A two-label name is never a subdomain: one request, and no wasted second.
+    const apex = await run([{ id: 'n0', type: 'infrastructure.domain', data: { domain_name: 'evil.test' } }], {
+        body: () => ({ status: 200, body: JSON.stringify({ pulse_info: { count: 0, pulses: [] } }) }),
+    });
+    check(apex.calls.length === 1, `a two-label name costs one request, got ${apex.calls.length}`);
+
+    // Three labels: hostname first. When it answers, the fallback is not paid.
+    const sub = await run([{ id: 'n0', type: 'infrastructure.domain', data: { domain_name: 'cdn.evil.test' } }]);
+    check(sub.calls.length === 1, `a hostname that answers costs one request, got ${sub.calls.length}`);
+    check(/\/hostname\//.test(sub.calls[0].url), `hostname is tried first: ${sub.calls[0].url}`);
+
+    // bbc.co.uk is the case the fallback exists for: three labels, but an apex — 23 pulses under
+    // /domain/ and 0 under /hostname/. No label count can tell it from cdn.jsdelivr.net.
+    const seen: string[] = [];
+    const apexUnderMultiTld = await run([{ id: 'n0', type: 'infrastructure.domain', data: { domain_name: 'bbc.co.uk' } }], {
+        body: (url: string) => {
+            seen.push(url);
+            return url.includes('/hostname/')
+                ? { status: 200, body: JSON.stringify({ pulse_info: { count: 0, pulses: [] } }) }
+                : { status: 200, body: JSON.stringify(FIXTURE) };
+        },
+    });
+    check(seen.length === 2, `an empty hostname answer must fall back to domain, got ${seen.length} request(s)`);
+    check(/\/hostname\//.test(seen[0]) && /\/domain\//.test(seen[1]), `wrong order: ${seen.join(' then ')}`);
+    check(typed(apexUnderMultiTld.ctx, 'threat.campaign').length === 6, 'the fallback result is what gets staged');
+}
+
+// ── 8. A RATE LIMIT IS NOT AN EMPTY RESULT ─────────────────────────────────────────────────────
+// The anonymous limit is real: measured 25 refusals out of 25 while keyed requests succeeded at the
+// same instant. Counting a 429 as "nothing known" turns a throttle into a false negative on every
+// remaining node of a selection.
+{
+    const { result, ctx } = await run([{ id: 'n0', type: 'infrastructure.ip_address', data: { ip_address: '8.8.8.8' } }], {
+        body: () => ({ status: 429, body: '{"detail":"Rate limit exceeded"}' }),
+    });
+    check(typed(ctx, 'threat.campaign').length === 0, 'nothing is staged from a throttled lookup');
+    const summary = String((result as { summary?: string }).summary ?? '');
+    check(/REFUSED BY THE RATE LIMIT/.test(summary), `the run must say it was throttled: ${summary}`);
+    check(!/nothing reported against them/.test(summary), 'and must NOT report it as a clean negative');
+    check(/free OTX API key/.test(summary), 'and must name the remedy when running without a key');
+}
+
+// ── 9. THE KEY IS OPTIONAL, AND SENT WHEN PRESENT ──────────────────────────────────────────────
+{
+    const withKey = await runConfig({ api_key: 'k' }, [{ id: 'n0', type: 'infrastructure.ip_address', data: { ip_address: '8.8.8.8' } }]);
+    const h = Object.fromEntries(Object.entries(withKey.calls[0].headers).map(([k, v]) => [k.toLowerCase(), v]));
+    check(h['x-otx-api-key'] === 'k', `a configured key must be sent, saw ${JSON.stringify(withKey.calls[0].headers)}`);
+
+    const without = await run([{ id: 'n0', type: 'infrastructure.ip_address', data: { ip_address: '8.8.8.8' } }]);
+    const h2 = Object.keys(without.calls[0].headers).map((x) => x.toLowerCase());
+    check(!h2.includes('x-otx-api-key'), 'and no key header is invented when none is configured');
 }
 
 if (fail.length) {

@@ -10,31 +10,47 @@ const BASE = 'https://otx.alienvault.com/api/v1/indicators';
  * `null` for a node type OTX has no endpoint for, which is how the run counts what it passed over
  * rather than silently returning nothing for a selection the analyst thought was covered.
  */
-function target(n: GraphNode): { path: string; label: string } | null {
+function target(n: GraphNode): { paths: string[]; label: string } | null {
     const d = (n.data ?? {}) as Record<string, unknown>;
     const s = (k: string) => (typeof d[k] === 'string' ? (d[k] as string).trim() : '');
     switch (n.type) {
         case 'infrastructure.ip_address': {
             const ip = s('ip_address');
             if (!ip) return null;
-            return { path: `${ip.includes(':') ? 'IPv6' : 'IPv4'}/${encodeURIComponent(ip)}`, label: ip };
+            return { paths: [`${ip.includes(':') ? 'IPv6' : 'IPv4'}/${encodeURIComponent(ip)}`], label: ip };
         }
         case 'infrastructure.domain': {
+            // OTX INDEXES `domain` AND `hostname` SEPARATELY, and this is not a formality: measured
+            // 2026-09-10, mail.ru returns 50 pulses under /domain/ and 0 under /hostname/, while
+            // cdn.jsdelivr.net returns 0 under /domain/ and 50 under /hostname/. One
+            // infrastructure.domain node can be either — the type holds apexes and subdomains alike
+            // — so asking the wrong one returns an empty result that reads exactly like "OTX has
+            // nothing on this". Every subdomain in a graph would have come back clean.
+            //
+            // Label count decides which to try FIRST, and the fallback is what makes it correct
+            // rather than merely usually-right: bbc.co.uk has three labels and is an apex (23 pulses
+            // under /domain/, 0 under /hostname/), and no label count can tell it from
+            // cdn.jsdelivr.net without the public suffix list. A two-label name is never a
+            // subdomain, so it needs no second try.
             const dom = s('domain_name');
-            return dom ? { path: `domain/${encodeURIComponent(dom)}`, label: dom } : null;
+            if (!dom) return null;
+            const labels = dom.split('.').filter(Boolean).length;
+            const asDomain = `domain/${encodeURIComponent(dom)}`;
+            const asHostname = `hostname/${encodeURIComponent(dom)}`;
+            return { paths: labels >= 3 ? [asHostname, asDomain] : [asDomain], label: dom };
         }
         case 'web.url': {
             const u = s('url');
-            return u ? { path: `url/${encodeURIComponent(u)}`, label: u } : null;
+            return u ? { paths: [`url/${encodeURIComponent(u)}`], label: u } : null;
         }
         case 'threat.vulnerability': {
             const cve = s('cve_id');
-            return cve ? { path: `cve/${encodeURIComponent(cve)}`, label: cve } : null;
+            return cve ? { paths: [`cve/${encodeURIComponent(cve)}`], label: cve } : null;
         }
         case 'threat.file_hash': {
             // OTX resolves any of the three under one `file` endpoint; prefer the strongest present.
             const h = s('sha256') || s('sha1') || s('md5');
-            return h ? { path: `file/${encodeURIComponent(h)}`, label: h } : null;
+            return h ? { paths: [`file/${encodeURIComponent(h)}`], label: h } : null;
         }
         default:
             return null;
@@ -89,7 +105,7 @@ export const otxPulses = definePlugin({
         name: 'OTX Pulses',
         version: '1.0.0',
         description:
-            'Fetches the AlienVault OTX reports ("pulses") that name each selected IP, domain, URL, file hash or CVE, and stages the substantial ones as campaigns — with their ATT&CK techniques, malware families and named adversary. Keyless: measured to return identical results with and without an API key. Community-published pulses are claims, not observations; the run drops scratch pulses and bulk feed dumps and says how many it dropped.',
+            'Fetches the AlienVault OTX reports ("pulses") that name each selected IP, domain, URL, file hash or CVE, and stages the substantial ones as campaigns — with their ATT&CK techniques, malware families and named adversary. Runs without an API key: a key returns the same pulses, it only removes the anonymous rate limit, so add one for anything bigger than a handful of nodes. Community-published pulses are claims, not observations; the run drops scratch pulses and bulk feed dumps and says how many it dropped.',
         icon: 'radar',
         author: { name: 'VINEYARD', url: 'https://vineyard.run' },
         license: 'Apache-2.0',
@@ -128,6 +144,18 @@ export const otxPulses = definePlugin({
         },
         scopes: {
             graph: ['node:read', 'node:create', 'edge:create'],
+            // Optional, and it is about throughput rather than access. Anonymous callers get the
+            // same pulses and then get cut off; a free key removes the throttle.
+            config: [
+                {
+                    key: 'api_key',
+                    label: 'OTX API key (optional \u2014 removes the anonymous rate limit)',
+                    type: 'string',
+                    secret: true,
+                    scope: 'user',
+                    optional: true,
+                },
+            ],
             network: [
                 {
                     endpoint: 'https://otx.alienvault.com/api/v1/indicators',
@@ -147,6 +175,16 @@ export const otxPulses = definePlugin({
 
         const maxIndicators = Number(ctx.params?.max_pulse_indicators ?? 1000) || 1000;
 
+        // OPTIONAL, AND THE REASON IS THE RATE LIMIT RATHER THAN THE DATA. Measured 2026-09-10: the
+        // same indicator returns the same pulses with and without a key, so a key buys no extra
+        // intelligence. What it buys is throughput — anonymous callers are cut off after a handful
+        // of requests (HTTP 429, no Retry-After, no rate headers) while keyed requests succeed at
+        // the same instant, and a keyed burst of 20 ran clean against an anonymous burst that was
+        // refused 25 times out of 25. So: no key works for a few nodes at a time; a free key is what
+        // makes a selection of any size finish.
+        const apiKey = String(ctx.config?.api_key ?? '').trim();
+        const headers = apiKey ? { 'X-OTX-API-KEY': apiKey } : undefined;
+
         let looked = 0;
         let clean = 0; // OTX knows the indicator and has nothing on it
         let campaigns = 0;
@@ -154,6 +192,7 @@ export const otxPulses = definePlugin({
         let tooBroad = 0;
         let unsupported = 0;
         let failed = 0;
+        let limited = 0;
         const named: string[] = [];
         // Within one run, one pulse becomes one node however many seeds it covers — which is the
         // point: two addresses in the same report converge on it.
@@ -187,28 +226,46 @@ export const otxPulses = definePlugin({
                 message: `OTX: ${t.label} (${i + 1}/${ids.length})`,
             });
 
-            let doc: { pulse_info?: { count?: number; pulses?: Pulse[] } };
-            try {
-                const res = await ctx.net.fetch(`${BASE}/${t.path}/general`, { method: 'GET' });
-                // 404 is a real answer — OTX has never seen the indicator — but it is not a report,
-                // so it counts the same way an empty pulse list does.
-                if (res.status === 404) {
-                    clean++;
-                    looked++;
-                    continue;
+            // Walk the candidate endpoints in order and stop at the first that ACTUALLY ANSWERS.
+            // For everything but a domain there is one, so this is a single request; for a domain
+            // the second is paid only when the first came back empty, which is exactly when there
+            // is still no answer.
+            let pulses: Pulse[] = [];
+            let broke = false;
+            for (const path of t.paths) {
+                if (ctx.signal?.aborted) break;
+                try {
+                    const res = await ctx.net.fetch(`${BASE}/${path}/general`, { method: 'GET', headers });
+                    // 404 is a real answer — OTX has never seen this indicator under this type.
+                    if (res.status === 404) continue;
+                    // 429 is the anonymous rate limit, and it is NOT an empty result. Counting it as
+                    // "nothing known" would turn a throttle into a false negative on every remaining
+                    // node of the selection, which is the exact shape this plugin exists to avoid.
+                    if (res.status === 429) {
+                        limited++;
+                        broke = true;
+                        break;
+                    }
+                    if (!res.ok) {
+                        broke = true;
+                        break;
+                    }
+                    const doc = (await res.json()) as { pulse_info?: { count?: number; pulses?: Pulse[] } };
+                    const got = doc?.pulse_info?.pulses ?? [];
+                    if (got.length) {
+                        pulses = got;
+                        break;
+                    }
+                } catch {
+                    broke = true;
+                    break;
                 }
-                if (!res.ok) {
-                    failed++;
-                    continue;
-                }
-                doc = (await res.json()) as typeof doc;
-            } catch {
+            }
+            if (broke) {
                 failed++;
                 continue;
             }
             looked++;
-
-            const pulses = doc?.pulse_info?.pulses ?? [];
             if (!pulses.length) {
                 clean++;
                 continue;
@@ -301,6 +358,13 @@ export const otxPulses = definePlugin({
         if (tooBroad) parts.push(`${tooBroad} skipped as feed dumps (over ${maxIndicators} indicators)`);
         if (clean) parts.push(`${clean} indicator(s) are in OTX with nothing reported against them — a real negative, not a failed lookup`);
         if (unsupported) parts.push(`${unsupported} selected node(s) are a type OTX has no lookup for`);
+        if (limited)
+            parts.push(
+                `${limited} lookup(s) were REFUSED BY THE RATE LIMIT, not answered — those indicators are unknown, not clean. ` +
+                    (apiKey
+                        ? 'Even with a key; wait and re-run the remaining nodes.'
+                        : 'Add a free OTX API key in this plugin\u2019s settings: it does not change the data, it removes the anonymous throttle.'),
+            );
         if (failed) parts.push(`${failed} lookup(s) failed`);
         return {
             summary: parts.join('. ') + '.',
@@ -312,6 +376,7 @@ export const otxPulses = definePlugin({
                 clean,
                 skipped_no_description: noDescription,
                 skipped_too_broad: tooBroad,
+                rate_limited: limited,
                 failed,
             },
         };

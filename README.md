@@ -13,12 +13,43 @@ Every other keyless source here answers *what is this address*. OTX answers *who
 it, and what did they say it was part of* — an indicator arrives already connected to a named
 report, so a bare IP becomes a campaign, a technique and a malware family in one hop.
 
-## Keyless — measured, not assumed
+## The API key is optional, and it buys throughput — not data
 
-On 2026-09-10 the same indicator was fetched with and without an OTX API key: **26 pulses either
-way, identical top-level keys, one byte of difference.** So this pack declares no config and holds
-no secret. The one endpoint where a key does matter (`/passive_dns`) refuses anonymous callers
-outright, which is why it is not used here rather than used and quietly failing.
+Two separate measurements, and conflating them is easy:
+
+- **Data: identical.** The same indicator returns the same pulses with and without a key — 26 either
+  way, identical top-level keys, one byte of difference in the response. A key reveals nothing extra.
+- **Rate limit: not identical at all.** Anonymous callers are cut off after a handful of requests
+  (HTTP 429, no `Retry-After`, no rate headers). Measured at the same instant: an anonymous burst was
+  refused **25 out of 25** while keyed requests returned 200, and a keyed burst of 20 ran clean.
+
+So the plugin works with no key for a few nodes at a time, and a free OTX key is what lets a
+selection of any size finish. A throttled lookup is reported as **throttled** — never as "nothing
+known", which would turn a rate limit into a false negative on every remaining node.
+
+`/passive_dns` is the one endpoint where a key changes the answer outright (it refuses anonymous
+callers), which is why it is not used here rather than used and quietly failing.
+
+## `domain` and `hostname` are different namespaces in OTX
+
+Measured 2026-09-10:
+
+| | `/domain/` | `/hostname/` |
+|---|---|---|
+| `mail.ru` | 50 pulses | 0 |
+| `cdn.jsdelivr.net` | 0 | 50 pulses |
+| `bbc.co.uk` | 23 pulses | 0 |
+| `news.bbc.co.uk` | 0 | 5 pulses |
+
+One `infrastructure.domain` node can be either — the type holds apexes and subdomains alike — so
+asking only one endpoint returns an empty result that reads exactly like *OTX knows nothing*. Every
+subdomain in a graph would have come back clean.
+
+Label count picks which to try first; the fallback is what makes it correct rather than
+usually-right. `bbc.co.uk` has three labels and is an apex, and no label count tells it from
+`cdn.jsdelivr.net` without the public suffix list — so a three-label name that comes back empty on
+`/hostname/` is retried on `/domain/`. A two-label name is never a subdomain and needs no second
+request.
 
 ## The filter is the plugin
 
