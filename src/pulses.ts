@@ -232,6 +232,7 @@ export const otxPulses = definePlugin({
             // is still no answer.
             let pulses: Pulse[] = [];
             let broke = false;
+            let throttled = false;
             for (const path of t.paths) {
                 if (ctx.signal?.aborted) break;
                 try {
@@ -241,9 +242,10 @@ export const otxPulses = definePlugin({
                     // 429 is the anonymous rate limit, and it is NOT an empty result. Counting it as
                     // "nothing known" would turn a throttle into a false negative on every remaining
                     // node of the selection, which is the exact shape this plugin exists to avoid.
+                    // Its own outcome, and NOT also a failure: counting it both ways put one
+                    // refused lookup on two lines of the summary, which reads as two problems.
                     if (res.status === 429) {
-                        limited++;
-                        broke = true;
+                        throttled = true;
                         break;
                     }
                     if (!res.ok) {
@@ -261,6 +263,10 @@ export const otxPulses = definePlugin({
                     break;
                 }
             }
+            if (throttled) {
+                limited++;
+                continue;
+            }
             if (broke) {
                 failed++;
                 continue;
@@ -272,7 +278,13 @@ export const otxPulses = definePlugin({
             }
 
             for (const p of pulses) {
-                const name = String(p.name ?? '').trim();
+                // Collapsed, because a pulse name is free text and really does contain newlines —
+                // "VirusTotal report\n                    for file.exe" is a live one. The name is
+                // the node's label AND its identity, so a raw newline both breaks the label and
+                // splits one report into two nodes when another pulse wraps it differently.
+                const name = String(p.name ?? '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
                 if (!name) continue;
                 const verdict = usable(p, maxIndicators);
                 if (verdict === 'no_description') {
@@ -346,7 +358,9 @@ export const otxPulses = definePlugin({
         const parts: string[] = [
             campaigns
                 ? `${campaigns} report(s) from ${looked} indicator(s)${named.length ? ` — ${named.join('; ')}` : ''}`
-                : `No usable report for any of ${looked} indicator(s)`,
+                : looked
+                ? `No usable report for any of ${looked} indicator(s)`
+                : 'No indicator was successfully looked up',
         ];
         if (techNode.size || malwareNode.size || actorNode.size)
             parts.push(

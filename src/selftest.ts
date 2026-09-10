@@ -94,6 +94,10 @@ const typed = (ctx: MockContext, t: string) => ctx.mock.createdNodes.filter((n) 
     const log4j = camps.find((c) => String(c.data.campaign_name).startsWith('Apache Log4j'))!;
     check(/^https:\/\/otx\.alienvault\.com\/pulse\/[0-9a-f]+$/.test(String(log4j.data.otx_pulse_url)), 'the campaign carries its OTX pulse URL');
     check(String(log4j.data.description).length > 0, 'and its description');
+    // A pulse name is free text and live ones contain newlines. The name is both the label and the
+    // identity, so a raw one breaks the label and splits one report across two nodes.
+    for (const c of camps)
+        check(!/[\r\n\t]|\s{2,}/.test(String(c.data.campaign_name)), `campaign name carries raw whitespace: ${JSON.stringify(c.data.campaign_name)}`);
 }
 
 // ── 2. WHAT THE PULSES CARRY ───────────────────────────────────────────────────────────────────
@@ -216,6 +220,10 @@ const typed = (ctx: MockContext, t: string) => ctx.mock.createdNodes.filter((n) 
     check(/REFUSED BY THE RATE LIMIT/.test(summary), `the run must say it was throttled: ${summary}`);
     check(!/nothing reported against them/.test(summary), 'and must NOT report it as a clean negative');
     check(/free OTX API key/.test(summary), 'and must name the remedy when running without a key');
+    // One refused lookup is ONE problem. Counting it as throttled AND failed put the same event on
+    // two lines of the summary, which reads as two nodes having gone wrong.
+    check(!/lookup\(s\) failed/.test(summary), `a throttled lookup must not also be counted as failed: ${summary}`);
+    check(!/for any of 0 indicator/.test(summary), `"for any of 0 indicator(s)" is nonsense when nothing was reached: ${summary}`);
 }
 
 // ── 9. THE KEY IS OPTIONAL, AND SENT WHEN PRESENT ──────────────────────────────────────────────
