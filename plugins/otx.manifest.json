@@ -1,0 +1,141 @@
+{
+  "identifier": "run.vineyard.pluginpacks.otx",
+  "content_type": "vineyard:pluginpack",
+  "name": "AlienVault OTX",
+  "version": "1.0.0",
+  "description": "Pulls the OTX threat reports (\"pulses\") that name a selected IP, domain, URL, file hash or CVE, and stages each as a campaign with the ATT&CK techniques, malware families and actor it records. Keyless, no server.",
+  "author": {
+    "name": "VINEYARD",
+    "url": "https://vineyard.run"
+  },
+  "license": "Apache-2.0",
+  "icon": "radar",
+  "platforms": {
+    "primary": "web",
+    "web": {
+      "runtime": "sandbox-js",
+      "entry": "dist/pack.mjs"
+    },
+    "desktop": {
+      "runtime": "sandbox-js",
+      "entry": "dist/pack.mjs",
+      "min_app_version": "0.1.0"
+    }
+  },
+  "distribution": {
+    "kind": "git",
+    "repository": "https://github.com/Vineyard-Intelligence/pluginpack-otx",
+    "ref": "v1.0.0",
+    "path": "plugins/otx.manifest.json"
+  },
+  "plugins": [
+    {
+      "identifier": "run.vineyard.plugins.otx_pulses",
+      "content_type": "vineyard:plugin",
+      "name": "OTX Pulses",
+      "version": "1.0.0",
+      "description": "Fetches the AlienVault OTX reports (\"pulses\") that name each selected IP, domain, URL, file hash or CVE, and stages the substantial ones as campaigns — with their ATT&CK techniques, malware families and named adversary. Keyless: measured to return identical results with and without an API key. Community-published pulses are claims, not observations; the run drops scratch pulses and bulk feed dumps and says how many it dropped.",
+      "icon": "radar",
+      "license": "Apache-2.0",
+      "platforms": {
+        "primary": "web",
+        "web": {
+          "runtime": "sandbox-js",
+          "entry": "dist/pack.mjs"
+        },
+        "desktop": {
+          "runtime": "sandbox-js",
+          "entry": "dist/pack.mjs",
+          "min_app_version": "0.1.0"
+        }
+      },
+      "io": {
+        "consumes": [
+          {
+            "typepack": "run.vineyard.typepacks.infrastructure",
+            "category": "infrastructure",
+            "name": "ip_address"
+          },
+          {
+            "typepack": "run.vineyard.typepacks.infrastructure",
+            "category": "infrastructure",
+            "name": "domain"
+          },
+          {
+            "typepack": "run.vineyard.typepacks.infrastructure",
+            "category": "web",
+            "name": "url"
+          },
+          {
+            "typepack": "run.vineyard.typepacks.threat",
+            "category": "threat",
+            "name": "file_hash"
+          },
+          {
+            "typepack": "run.vineyard.typepacks.threat",
+            "category": "threat",
+            "name": "vulnerability"
+          }
+        ],
+        "produces": [
+          {
+            "typepack": "run.vineyard.typepacks.threat",
+            "category": "threat",
+            "name": "campaign"
+          },
+          {
+            "typepack": "run.vineyard.typepacks.threat",
+            "category": "threat",
+            "name": "attack_pattern"
+          },
+          {
+            "typepack": "run.vineyard.typepacks.threat",
+            "category": "threat",
+            "name": "malware"
+          },
+          {
+            "typepack": "run.vineyard.typepacks.threat",
+            "category": "threat",
+            "name": "threat_actor"
+          }
+        ]
+      },
+      "params": {
+        "type": "object",
+        "properties": {
+          "max_pulse_indicators": {
+            "type": "integer",
+            "title": "Skip pulses larger than this many indicators",
+            "default": 1000,
+            "minimum": 1,
+            "description": "A pulse holding thousands of indicators is a feed dump rather than a report, and linking to it makes a hub that every address in that feed joins — which reads as a discovery and is not one. The measured worst case on one ordinary IP held 24,876. Raise this only when you specifically want the wide ones."
+          }
+        }
+      },
+      "scopes": {
+        "graph": [
+          "node:read",
+          "node:create",
+          "edge:create"
+        ],
+        "network": [
+          {
+            "endpoint": "https://otx.alienvault.com/api/v1/indicators",
+            "methods": [
+              "GET"
+            ],
+            "purpose": "Fetch the OTX pulses that reference an indicator (keyless; OTX sends CORS)."
+          }
+        ]
+      },
+      "lifecycle": {
+        "persistence": "opt-in",
+        "controls": [
+          "progress",
+          "cancel"
+        ],
+        "progress": "determinate"
+      }
+    }
+  ]
+}

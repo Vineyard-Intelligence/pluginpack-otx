@@ -1,0 +1,14 @@
+{
+  "name": "pluginpack-otx",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs && npm run selftest",
+    "typecheck": "tsc --noEmit --strict --target es2022 --module esnext --moduleResolution bundler --skipLibCheck src/main.ts",
+    "selftest": "esbuild src/selftest.ts --bundle --format=esm --platform=node --target=node20 --outfile=.selftest.mjs --log-level=warning && node .selftest.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}
