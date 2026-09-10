@@ -9,6 +9,7 @@
 // observed pointing at it. That is the reverse pivot the pack was missing.
 import { definePlugin } from './sdk';
 import type { HostContext, RunResult, GraphNode } from './sdk';
+import { domainPaths } from './indicator-type';
 
 const BASE = 'https://otx.alienvault.com/api/v1/indicators';
 
@@ -43,7 +44,7 @@ export const otxPassiveDns = definePlugin({
         identifier: 'run.vineyard.plugins.otx_passive_dns',
         content_type: 'vineyard:plugin',
         name: 'OTX Passive DNS',
-        version: '1.0.0',
+        version: '1.1.0',
         description:
             "Reads OTX's passively-observed DNS history for each selected domain or IP: which addresses a name resolved to and when, and — running backwards from an IP — every hostname seen pointing at it. The dates are the point: they separate infrastructure a subject still uses from infrastructure they had already abandoned. Needs a free OTX API key.",
         icon: 'history',
@@ -140,13 +141,10 @@ export const otxPassiveDns = definePlugin({
                 skipped++;
                 continue;
             }
-            // A domain node holds apexes and subdomains alike, and OTX indexes those separately —
-            // the same split the pulses plugin hit. Three labels or more is tried as a hostname
-            // first, and an empty answer falls back.
+            // Which OTX namespace this name lives in is a Public Suffix List question, not a
+            // label count — see indicator-type.ts.
             const paths = isDomain
-                ? seedValue.split('.').filter(Boolean).length >= 3
-                    ? [`hostname/${encodeURIComponent(seedValue)}`, `domain/${encodeURIComponent(seedValue)}`]
-                    : [`domain/${encodeURIComponent(seedValue)}`]
+                ? domainPaths(seedValue)
                 : [`${seedValue.includes(':') ? 'IPv6' : 'IPv4'}/${encodeURIComponent(seedValue)}`];
 
             ctx.progress?.set?.({

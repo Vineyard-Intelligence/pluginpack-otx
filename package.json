@@ -10,5 +10,8 @@
   "devDependencies": {
     "esbuild": "^0.25.0",
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "tldts": "^7.4.12"
   }
 }

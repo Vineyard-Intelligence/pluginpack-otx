@@ -1,6 +1,7 @@
 // OTX Pulses — indicator → the reports that name it.
 import { definePlugin } from './sdk';
 import type { HostContext, RunResult, GraphNode } from './sdk';
+import { domainPaths } from './indicator-type';
 
 const BASE = 'https://otx.alienvault.com/api/v1/indicators';
 
@@ -20,24 +21,8 @@ function target(n: GraphNode): { paths: string[]; label: string } | null {
             return { paths: [`${ip.includes(':') ? 'IPv6' : 'IPv4'}/${encodeURIComponent(ip)}`], label: ip };
         }
         case 'infrastructure.domain': {
-            // OTX INDEXES `domain` AND `hostname` SEPARATELY, and this is not a formality: measured
-            // 2026-09-10, mail.ru returns 50 pulses under /domain/ and 0 under /hostname/, while
-            // cdn.jsdelivr.net returns 0 under /domain/ and 50 under /hostname/. One
-            // infrastructure.domain node can be either — the type holds apexes and subdomains alike
-            // — so asking the wrong one returns an empty result that reads exactly like "OTX has
-            // nothing on this". Every subdomain in a graph would have come back clean.
-            //
-            // Label count decides which to try FIRST, and the fallback is what makes it correct
-            // rather than merely usually-right: bbc.co.uk has three labels and is an apex (23 pulses
-            // under /domain/, 0 under /hostname/), and no label count can tell it from
-            // cdn.jsdelivr.net without the public suffix list. A two-label name is never a
-            // subdomain, so it needs no second try.
-            const dom = s('domain_name');
-            if (!dom) return null;
-            const labels = dom.split('.').filter(Boolean).length;
-            const asDomain = `domain/${encodeURIComponent(dom)}`;
-            const asHostname = `hostname/${encodeURIComponent(dom)}`;
-            return { paths: labels >= 3 ? [asHostname, asDomain] : [asDomain], label: dom };
+            const d2 = s('domain_name');
+            return d2 ? { paths: domainPaths(d2), label: d2 } : null;
         }
         case 'web.url': {
             const u = s('url');
@@ -103,7 +88,7 @@ export const otxPulses = definePlugin({
         identifier: 'run.vineyard.plugins.otx_pulses',
         content_type: 'vineyard:plugin',
         name: 'OTX Pulses',
-        version: '1.0.0',
+        version: '1.1.0',
         description:
             'Fetches the AlienVault OTX reports ("pulses") that name each selected IP, domain, URL, file hash or CVE, and stages the substantial ones as campaigns — with their ATT&CK techniques, malware families and named adversary. Needs a free OTX API key: the key does not change the data, it is what stops OTX cutting the run off after a few indicators. Community-published pulses are claims, not observations; the run drops scratch pulses and bulk feed dumps and says how many it dropped.',
         icon: 'radar',

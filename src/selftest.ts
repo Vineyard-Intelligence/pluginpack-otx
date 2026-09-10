@@ -159,8 +159,7 @@ const typed = (ctx: MockContext, t: string) => ctx.mock.createdNodes.filter((n) 
     const cases: Array<[Record<string, unknown>, string, RegExp]> = [
         [{ ip_address: '2001:db8::1' }, 'infrastructure.ip_address', /\/IPv6\/2001%3Adb8%3A%3A1\/general$/],
         [{ domain_name: 'evil.test' }, 'infrastructure.domain', /\/domain\/evil\.test\/general$/],
-        // Three labels or more: hostname is tried FIRST, because OTX indexes the two separately and
-        // a subdomain asked as a domain comes back empty.
+        // Routed by the Public Suffix List, not by label count — see test 7.
         [{ domain_name: 'cdn.evil.test' }, 'infrastructure.domain', /\/hostname\/cdn\.evil\.test\/general$/],
         [{ url: 'http://evil.test/a?b=1' }, 'web.url', /\/url\/http%3A%2F%2Fevil\.test%2Fa%3Fb%3D1\/general$/],
         [{ cve_id: 'CVE-2021-44228' }, 'threat.vulnerability', /\/cve\/CVE-2021-44228\/general$/],
@@ -179,37 +178,48 @@ const typed = (ctx: MockContext, t: string) => ctx.mock.createdNodes.filter((n) 
     check(/no lookup for/.test(String((other.result as { summary?: string }).summary)), 'and is counted, not silently dropped');
 }
 
-// ── 7. DOMAIN AND HOSTNAME ARE DIFFERENT NAMESPACES IN OTX ─────────────────────────────────────
-// Measured 2026-09-10: mail.ru has 50 pulses under /domain/ and 0 under /hostname/;
-// cdn.jsdelivr.net has 0 under /domain/ and 50 under /hostname/. One infrastructure.domain node
-// can be either, so asking only one endpoint returns an empty result that reads exactly like "OTX
-// knows nothing" — every subdomain in a graph would have come back clean.
+// ── 7. THE PUBLIC SUFFIX LIST DECIDES WHICH NAMESPACE A NAME IS IN ────────────────────────────
+//
+// OTX indexes `domain` and `hostname` separately and will not answer for the wrong one — measured,
+// mail.ru has 50 pulses under /domain/ and 0 under /hostname/, cdn.jsdelivr.net the reverse. Asking
+// the wrong endpoint returns an empty result that reads exactly like "OTX knows nothing".
+//
+// Counting labels cannot decide it. All three of these have three labels and they are not the same
+// kind of name, which is why this went to tldts and the PSL rather than a heuristic.
 {
-    // A two-label name is never a subdomain: one request, and no wasted second.
-    const apex = await run([{ id: 'n0', type: 'infrastructure.domain', data: { domain_name: 'evil.test' } }], {
-        body: () => ({ status: 200, body: JSON.stringify({ pulse_info: { count: 0, pulses: [] } }) }),
-    });
-    check(apex.calls.length === 1, `a two-label name costs one request, got ${apex.calls.length}`);
+    const cases: Array<[string, 'domain' | 'hostname', string]> = [
+        ['evil.test', 'domain', 'two labels: registrable'],
+        ['cdn.jsdelivr.net', 'hostname', 'three labels, a host under jsdelivr.net'],
+        ['bbc.co.uk', 'domain', 'three labels, but co.uk is a public suffix so this IS registrable'],
+        ['news.bbc.co.uk', 'hostname', 'four labels under a two-label suffix'],
+        ['user.blogspot.com', 'domain', 'blogspot.com is a PRIVATE-section suffix — this is registrable'],
+        ['a.user.blogspot.com', 'hostname', 'and this sits under it'],
+        ['xn--85x722f.xn--55qx5d.cn', 'domain', 'IDN in punycode: xn--55qx5d.cn (公司.cn) is a suffix'],
+    ];
+    for (const [name, want, why] of cases) {
+        const { calls } = await run([{ id: 'n0', type: 'infrastructure.domain', data: { domain_name: name } }]);
+        check(calls.length === 1, `${name}: the list is certain, so one request — got ${calls.length} (${why})`);
+        check(
+            new RegExp(`/${want}/${name.replace(/\./g, '\\.')}/general$`).test(calls[0]?.url ?? ''),
+            `${name} should be a ${want} (${why}) — asked ${calls[0]?.url}`,
+        );
+    }
+}
 
-    // Three labels: hostname first. When it answers, the fallback is not paid.
-    const sub = await run([{ id: 'n0', type: 'infrastructure.domain', data: { domain_name: 'cdn.evil.test' } }]);
-    check(sub.calls.length === 1, `a hostname that answers costs one request, got ${sub.calls.length}`);
-    check(/\/hostname\//.test(sub.calls[0].url), `hostname is tried first: ${sub.calls[0].url}`);
-
-    // bbc.co.uk is the case the fallback exists for: three labels, but an apex — 23 pulses under
-    // /domain/ and 0 under /hostname/. No label count can tell it from cdn.jsdelivr.net.
+// ── 7b. A NAME THE LIST CANNOT PLACE STILL GETS BOTH TRIES ─────────────────────────────────────
+// The fallback is no longer the mechanism, it is the staleness net: a suffix registered after the
+// bundled snapshot was cut leaves tldts with no registrable domain at all, and that is the one case
+// left where asking twice is right.
+{
     const seen: string[] = [];
-    const apexUnderMultiTld = await run([{ id: 'n0', type: 'infrastructure.domain', data: { domain_name: 'bbc.co.uk' } }], {
+    await run([{ id: 'n0', type: 'infrastructure.domain', data: { domain_name: 'co.uk' } }], {
         body: (url: string) => {
             seen.push(url);
-            return url.includes('/hostname/')
-                ? { status: 200, body: JSON.stringify({ pulse_info: { count: 0, pulses: [] } }) }
-                : { status: 200, body: JSON.stringify(FIXTURE) };
+            return { status: 200, body: JSON.stringify({ pulse_info: { count: 0, pulses: [] } }) };
         },
     });
-    check(seen.length === 2, `an empty hostname answer must fall back to domain, got ${seen.length} request(s)`);
+    check(seen.length === 2, `a bare public suffix has no registrable form, so both are tried — got ${seen.length}`);
     check(/\/hostname\//.test(seen[0]) && /\/domain\//.test(seen[1]), `wrong order: ${seen.join(' then ')}`);
-    check(typed(apexUnderMultiTld.ctx, 'threat.campaign').length === 6, 'the fallback result is what gets staged');
 }
 
 // ── 8. A RATE LIMIT IS NOT AN EMPTY RESULT ─────────────────────────────────────────────────────

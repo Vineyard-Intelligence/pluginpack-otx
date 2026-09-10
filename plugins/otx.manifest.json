@@ -2,7 +2,7 @@
   "identifier": "run.vineyard.pluginpacks.otx",
   "content_type": "vineyard:pluginpack",
   "name": "AlienVault OTX",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Pulls the OTX threat reports (\"pulses\") that name a selected IP, domain, URL, file hash or CVE, and stages each as a campaign with the ATT&CK techniques, malware families and actor it records. Runs without an API key; an optional free key removes the anonymous rate limit.",
   "author": {
     "name": "VINEYARD",
@@ -25,7 +25,7 @@
   "distribution": {
     "kind": "git",
     "repository": "https://github.com/Vineyard-Intelligence/pluginpack-otx",
-    "ref": "v1.1.0",
+    "ref": "v1.2.0",
     "path": "plugins/otx.manifest.json"
   },
   "plugins": [
@@ -33,7 +33,7 @@
       "identifier": "run.vineyard.plugins.otx_pulses",
       "content_type": "vineyard:plugin",
       "name": "OTX Pulses",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "description": "Fetches the AlienVault OTX reports (\"pulses\") that name each selected IP, domain, URL, file hash or CVE, and stages the substantial ones as campaigns — with their ATT&CK techniques, malware families and named adversary. Needs a free OTX API key: the key does not change the data, it is what stops OTX cutting the run off after a few indicators. Community-published pulses are claims, not observations; the run drops scratch pulses and bulk feed dumps and says how many it dropped.",
       "icon": "radar",
       "license": "Apache-2.0",
@@ -151,7 +151,7 @@
       "identifier": "run.vineyard.plugins.otx_passive_dns",
       "content_type": "vineyard:plugin",
       "name": "OTX Passive DNS",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "description": "Reads OTX's passively-observed DNS history for each selected domain or IP: which addresses a name resolved to and when, and — running backwards from an IP — every hostname seen pointing at it. The dates are the point: they separate infrastructure a subject still uses from infrastructure they had already abandoned. Needs a free OTX API key.",
       "icon": "history",
       "license": "Apache-2.0",

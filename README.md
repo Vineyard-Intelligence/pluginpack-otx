@@ -77,11 +77,30 @@ One `infrastructure.domain` node can be either — the type holds apexes and sub
 asking only one endpoint returns an empty result that reads exactly like *OTX knows nothing*. Every
 subdomain in a graph would have come back clean.
 
-Label count picks which to try first; the fallback is what makes it correct rather than
-usually-right. `bbc.co.uk` has three labels and is an apex, and no label count tells it from
-`cdn.jsdelivr.net` without the public suffix list — so a three-label name that comes back empty on
-`/hostname/` is retried on `/domain/`. A two-label name is never a subdomain and needs no second
-request.
+**The Public Suffix List decides which**, via [`tldts`](https://github.com/remusao/tldts) with
+`allowPrivateDomains: true`. Counting labels cannot: all three of `bbc.co.uk` (registrable),
+`cdn.jsdelivr.net` (a host), and `user.blogspot.com` (registrable, because `blogspot.com` is itself
+a public suffix) have three labels and are not the same kind of name.
+
+A hand-rolled lookup was built first and measured against the PSL project's own 78-case suite
+alongside tldts. Size was a wash — 38.7KB gzipped hand-rolled against 46.4KB, and tldts is smaller
+before compression. Correctness was not: the hand-rolled version failed 4 cases, **all of them
+IDN**, because the list stores 299 rules as Unicode (`公司.cn`) while a graph holds punycode
+(`xn--55qx5d.cn`) — closing that means carrying a punycode encoder. It had already failed 10 more
+from a data trim that silently dropped the single-label wildcards `*.ck` and `*.mm`. Both bugs
+surfaced within an hour of running the official suite, which is the whole argument: tldts already
+has that suite and a maintainer. Its own 2 failures are leading-dot inputs (`.example.com`), which
+a hostname field does not produce.
+
+The fallback survives, but it is no longer the mechanism — it is the staleness net. When `tldts`
+returns no registrable domain at all (a suffix registered after the bundled snapshot was cut), both
+endpoints are tried. Otherwise one request, decided.
+
+## Licences
+
+Apache-2.0, and the bundle carries [`tldts`](https://github.com/remusao/tldts) (MIT), which embeds
+the Mozilla [Public Suffix List](https://publicsuffix.org/) (MPL-2.0). Both are dependencies
+declared in `package.json` and inlined by the build; sources are at their respective projects.
 
 ## The filter is the plugin
 
