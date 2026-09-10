@@ -8,7 +8,10 @@
 // have proved the happy path and none of the behaviour that matters.
 import { createMockContext, type MockContext } from './sdk';
 import { otxPulses } from './pulses';
+import { otxPassiveDns } from './passive-dns';
 import FIXTURE from './fixture-otx.json';
+import PDNS from './fixture-pdns.json';
+import PDNS_IP from './fixture-pdns-ip.json';
 
 declare const process: { exit(code: number): never };
 
@@ -37,6 +40,7 @@ async function run(
         nodes,
         grantedScopes: GRANTS as never,
         params: opts.params,
+        config: { api_key: 'k' },
         netHandler: async (url: string, init?: { headers?: Record<string, string> }) => {
             calls.push({ url, headers: init?.headers ?? {} });
             const r = opts.body ? opts.body(url) : { status: 200, body: JSON.stringify(FIXTURE) };
@@ -72,11 +76,12 @@ const typed = (ctx: MockContext, t: string) => ctx.mock.createdNodes.filter((n) 
     check(calls.length === 1, `one indicator is one request, got ${calls.length}`);
     check(/\/IPv4\/45\.155\.205\.233\/general$/.test(calls[0].url), `the IPv4 endpoint is used: ${calls[0].url}`);
 
-    // Keyless is the claim in the description and the manifest declares no config, so nothing may
-    // send an OTX key header — a plugin that quietly needs one is a plugin that stops working for
-    // everyone who does not have one.
-    const hdrs = Object.keys(calls[0].headers).map((h) => h.toLowerCase());
-    check(!hdrs.some((h) => h.includes('otx') || h === 'authorization'), `no key header may be sent, saw ${hdrs.join(', ')}`);
+    // The key is required now and must reach the request. It was optional first, on the grounds
+    // that the data is identical with and without one — true of the response, wrong about the
+    // product: anonymous callers are cut off after a handful of indicators, so the honest choice
+    // was between "asks for a free key up front" and "silently returns a partial graph".
+    const hdrs = Object.fromEntries(Object.entries(calls[0].headers).map(([k, v]) => [k.toLowerCase(), v]));
+    check(hdrs['x-otx-api-key'] === 'k', `the configured key must reach the request, saw ${JSON.stringify(calls[0].headers)}`);
 
     const camps = typed(ctx, 'threat.campaign');
     check(camps.length === 6, `26 pulses must yield 6 reports, got ${camps.length}`);
@@ -219,22 +224,191 @@ const typed = (ctx: MockContext, t: string) => ctx.mock.createdNodes.filter((n) 
     const summary = String((result as { summary?: string }).summary ?? '');
     check(/REFUSED BY THE RATE LIMIT/.test(summary), `the run must say it was throttled: ${summary}`);
     check(!/nothing reported against them/.test(summary), 'and must NOT report it as a clean negative');
-    check(/free OTX API key/.test(summary), 'and must name the remedy when running without a key');
+    check(/Wait and re-run/.test(summary), `a throttle with a key already set has one remedy — waiting: ${summary}`);
     // One refused lookup is ONE problem. Counting it as throttled AND failed put the same event on
     // two lines of the summary, which reads as two nodes having gone wrong.
     check(!/lookup\(s\) failed/.test(summary), `a throttled lookup must not also be counted as failed: ${summary}`);
     check(!/for any of 0 indicator/.test(summary), `"for any of 0 indicator(s)" is nonsense when nothing was reached: ${summary}`);
 }
 
-// ── 9. THE KEY IS OPTIONAL, AND SENT WHEN PRESENT ──────────────────────────────────────────────
+// ── 9. WHATEVER KEY IS CONFIGURED IS THE ONE THAT IS SENT ──────────────────────────────────────
+// Not a fixed string, not a default: a plugin that ignores the configured value and sends something
+// of its own would pass every other assertion here while charging somebody else's quota.
 {
-    const withKey = await runConfig({ api_key: 'k' }, [{ id: 'n0', type: 'infrastructure.ip_address', data: { ip_address: '8.8.8.8' } }]);
+    const withKey = await runConfig({ api_key: 'a-different-key' }, [
+        { id: 'n0', type: 'infrastructure.ip_address', data: { ip_address: '8.8.8.8' } },
+    ]);
     const h = Object.fromEntries(Object.entries(withKey.calls[0].headers).map(([k, v]) => [k.toLowerCase(), v]));
-    check(h['x-otx-api-key'] === 'k', `a configured key must be sent, saw ${JSON.stringify(withKey.calls[0].headers)}`);
+    check(h['x-otx-api-key'] === 'a-different-key', `the configured key must be sent verbatim, saw ${JSON.stringify(withKey.calls[0].headers)}`);
+}
 
-    const without = await run([{ id: 'n0', type: 'infrastructure.ip_address', data: { ip_address: '8.8.8.8' } }]);
-    const h2 = Object.keys(without.calls[0].headers).map((x) => x.toLowerCase());
-    check(!h2.includes('x-otx-api-key'), 'and no key header is invented when none is configured');
+// ══ PASSIVE DNS ════════════════════════════════════════════════════════════════════════════════
+// The fixture is 120 real records from mail.ru (2026-09-10) — 107 A, 12 AAAA, 1 CNAME, and 14 of
+// them carry NXDOMAIN in the address field. That last number is why this plugin has a sentinel
+// list at all.
+const PDNS_GRANTS = {
+    graph: ['node:read', 'node:create', 'edge:create'],
+    network: [{ endpoint: 'https://otx.alienvault.com/api/v1/indicators' }],
+} as const;
+
+async function runPdns(
+    nodes: Array<{ id: string; type: string; data: Record<string, unknown> }>,
+    opts: { config?: Record<string, string>; params?: Record<string, unknown>; body?: (url: string) => { status: number; body: string } } = {},
+) {
+    const calls: Call[] = [];
+    const ctx = createMockContext({
+        selection: nodes.map((n) => n.id),
+        nodes,
+        grantedScopes: PDNS_GRANTS as never,
+        params: opts.params,
+        config: opts.config ?? { api_key: 'k' },
+        netHandler: async (url: string, init?: { headers?: Record<string, string> }) => {
+            calls.push({ url, headers: init?.headers ?? {} });
+            const r = opts.body ? opts.body(url) : { status: 200, body: JSON.stringify(PDNS) };
+            return { ...r, headers: { 'content-type': 'application/json' } } as never;
+        },
+    }) as MockContext;
+    const result = await otxPassiveDns.run(ctx);
+    return { result, ctx, calls };
+}
+
+// ── P1. NXDOMAIN NEVER BECOMES A NODE ──────────────────────────────────────────────────────────
+// It is the resolver's answer, not a host. Left in, every domain whose lookup ever failed converges
+// on one node called NXDOMAIN — a false cluster with an edge per domain in the graph, which does
+// not look like a bug, it looks like a discovery.
+{
+    const { result, ctx } = await runPdns([{ id: 'n0', type: 'infrastructure.domain', data: { domain_name: 'mail.ru' } }], {
+        params: { max_records: 500 },
+    });
+    const names = ctx.mock.createdNodes.map((n) => String(Object.values(n.data)[0]));
+    check(!names.some((v) => /NXDOMAIN|SERVFAIL|REFUSED/i.test(v)), `a resolver sentinel became a node: ${names.filter((v) => /NXDOMAIN/i.test(v)).join(', ')}`);
+    check(/record\(s\) held a resolver sentinel/.test(String((result as { summary?: string }).summary)), 'and the run says how many it dropped');
+
+    // Every address that DID become a node is a real address.
+    for (const n of ctx.mock.createdNodes.filter((x) => x.type === 'infrastructure.ip_address'))
+        check(/^[0-9.]+$|:/.test(String(n.data.ip_address)), `not an address: ${n.data.ip_address}`);
+}
+
+// ── P1b. THE SENTINEL LIST'S OWN PATH: A CNAME ─────────────────────────────────────────────────
+// On an A record the address check already rejects NXDOMAIN, because it is not an address. On a
+// CNAME the target IS a hostname, so "not an IP" is satisfied and NXDOMAIN sails through into a
+// DOMAIN node — which is the hub, and the only guard against it is the sentinel list. The real
+// mail.ru response holds one CNAME, so this path was untested until it was written by hand.
+{
+    const doctored = {
+        passive_dns: [
+            { hostname: 'a.evil.test', address: 'NXDOMAIN', record_type: 'CNAME', first: '2025-01-01T00:00:00', last: '2025-06-01T00:00:00' },
+            { hostname: 'b.evil.test', address: 'SERVFAIL', record_type: 'CNAME', first: '2025-01-01T00:00:00', last: '2025-06-01T00:00:00' },
+            { hostname: 'c.evil.test', address: 'real.example.com', record_type: 'CNAME', first: '2025-01-01T00:00:00', last: '2025-06-01T00:00:00' },
+        ],
+    };
+    const { ctx } = await runPdns([{ id: 'n0', type: 'infrastructure.domain', data: { domain_name: 'evil.test' } }], {
+        body: () => ({ status: 200, body: JSON.stringify(doctored) }),
+    });
+    const domains = ctx.mock.createdNodes.filter((n) => n.type === 'infrastructure.domain').map((n) => String(n.data.domain_name));
+    check(!domains.some((d) => /NXDOMAIN|SERVFAIL/i.test(d)), `a resolver sentinel became a DOMAIN node: ${domains.join(', ')}`);
+    check(domains.includes('real.example.com'), 'a genuine CNAME target must still be created');
+}
+
+// ── P2. THE DATES ARE THE POINT, AND THEY ARE ON THE LABEL ─────────────────────────────────────
+// This edge's whole value over the "resolves to" another plugin draws is WHEN. A reader looking at
+// the canvas sees labels, not edge data.
+{
+    const { ctx } = await runPdns([{ id: 'n0', type: 'infrastructure.domain', data: { domain_name: 'mail.ru' } }]);
+    const edges = ctx.mock.createdEdges.filter((e) => /resolved to|aliased to/.test(e.label));
+    check(edges.length > 0, 'no dated resolution edge was drawn');
+    check(edges.some((e) => /\(\d{4}-\d{2}-\d{2}/.test(e.label)), `no edge label carries a date: ${edges.slice(0, 3).map((e) => e.label).join(' | ')}`);
+    check(edges.every((e) => (e.data as Record<string, unknown>)?.source === 'otx_passive_dns'), 'edges must name their source');
+}
+
+// ── P3. A SUBDOMAIN'S HISTORY BELONGS TO THE SUBDOMAIN ─────────────────────────────────────────
+// The record is about its own hostname. Hanging it on the apex loses which name actually resolved.
+{
+    const { ctx } = await runPdns([{ id: 'n0', type: 'infrastructure.domain', data: { domain_name: 'mail.ru' } }], {
+        params: { max_records: 500 },
+    });
+    const subs = ctx.mock.createdNodes.filter((n) => n.type === 'infrastructure.domain');
+    check(subs.length > 0, 'the fixture has 83 distinct hostnames; none became a node');
+    check(ctx.mock.createdEdges.some((e) => e.label === 'subdomain'), 'a discovered hostname is not linked back to the seed');
+    check(!subs.some((n) => String(n.data.domain_name).toLowerCase() === 'mail.ru'), 'the seed must not be recreated as its own subdomain');
+}
+
+// ── P4. AN IP SEED RUNS BACKWARDS, AND THE DISCOVERY IS THE HOSTNAME ───────────────────────────
+//
+// This is the assertion that was WRONG first, and the way it was wrong is the lesson. A record is
+// always (hostname → address). Query a domain and `address` is the discovery; query an IP and
+// `address` IS THE SEED, repeated on all 500 rows, while `hostname` is the discovery. The original
+// test fed a DOMAIN-shaped fixture to an IP seed, so `address` happened to hold a different IP and
+// the code looked right while it was in fact duplicating the seed and drawing an edge to itself.
+// A fixture standing in for a shape it does not have proves nothing — so this one is a real
+// /IPv4/8.8.8.8/passive_dns response.
+{
+    const { ctx, calls } = await runPdns([{ id: 'n0', type: 'infrastructure.ip_address', data: { ip_address: '8.8.8.8' } }], {
+        params: { max_records: 20 },
+        body: () => ({ status: 200, body: JSON.stringify(PDNS_IP) }),
+    });
+    check(/\/IPv4\/8\.8\.8\.8\/passive_dns$/.test(calls[0].url), `wrong endpoint: ${calls[0].url}`);
+
+    // The seed must not be recreated as one of its own findings.
+    const ips = ctx.mock.createdNodes.filter((n) => n.type === 'infrastructure.ip_address');
+    check(ips.length === 0, `an IP seed discovers HOSTNAMES, not addresses — it created ${ips.map((n) => n.data.ip_address).join(', ')}`);
+    const domains = ctx.mock.createdNodes.filter((n) => n.type === 'infrastructure.domain');
+    check(domains.length > 0, 'the hostnames that pointed at this address must become nodes');
+    check(
+        domains.some((n) => String(n.data.domain_name) === 'zenixasia.com'),
+        `a known hostname from the real response is missing: ${domains.slice(0, 4).map((n) => n.data.domain_name).join(', ')}`,
+    );
+
+    const edges = ctx.mock.createdEdges;
+    check(edges.length > 0 && edges.every((e) => e.to === 'n0'), 'every edge must point AT the seed address');
+    check(!edges.some((e) => e.from === e.to), 'the seed must never be linked to itself');
+    check(edges.some((e) => /resolved to \(\d{4}/.test(e.label)), `the dates must survive the reverse direction: ${edges[0]?.label}`);
+}
+
+// ── P5. THE CAP IS A WINDOW, AND THE RUN SAYS SO ───────────────────────────────────────────────
+// mail.ru has 556 records and 8.8.8.8 has 500 hostnames mostly belonging to strangers who
+// misconfigured their DNS. Taking them all makes a hub; taking some silently makes a lie.
+{
+    const { result, ctx } = await runPdns([{ id: 'n0', type: 'infrastructure.domain', data: { domain_name: 'mail.ru' } }], {
+        params: { max_records: 5 },
+    });
+    check(ctx.mock.createdEdges.filter((e) => /resolved to|aliased to/.test(e.label)).length <= 5, 'the cap is not applied');
+    const summary = String((result as { summary?: string }).summary);
+    check(/record\(s\) beyond the 5-record cap/.test(summary), `the run must name what it left behind: ${summary}`);
+    check(/a window, not the whole history/.test(summary), 'and must say the result is partial');
+}
+
+// ── P6. THE KEY IS REQUIRED, AND REFUSING COSTS NO REQUEST ─────────────────────────────────────
+{
+    const { result, calls } = await runPdns([{ id: 'n0', type: 'infrastructure.domain', data: { domain_name: 'mail.ru' } }], { config: {} });
+    check(calls.length === 0, 'a run with no key must not call OTX at all');
+    check(/needs a free AlienVault OTX API key/.test(String((result as { summary?: string }).summary)), 'and must say what to do');
+}
+{
+    const { calls } = await runPdns([{ id: 'n0', type: 'infrastructure.ip_address', data: { ip_address: '1.2.3.4' } }], { config: { api_key: 'secret' } });
+    const h = Object.fromEntries(Object.entries(calls[0].headers).map(([k, v]) => [k.toLowerCase(), v]));
+    check(h['x-otx-api-key'] === 'secret', 'the key must reach the request');
+}
+
+// ── P7. PULSES ALSO REFUSES WITHOUT A KEY NOW ──────────────────────────────────────────────────
+// It was optional first, on the grounds that the data is identical. That was right about the
+// response and wrong about the product: "works, then stops after six nodes" produces a partial
+// answer with no signal that it is partial.
+{
+    const calls: Call[] = [];
+    const ctx = createMockContext({
+        selection: ['n0'],
+        nodes: [{ id: 'n0', type: 'infrastructure.ip_address', data: { ip_address: '8.8.8.8' } }],
+        grantedScopes: GRANTS as never,
+        config: {},
+        netHandler: async (url: string) => {
+            calls.push({ url, headers: {} });
+            return { status: 200, body: JSON.stringify(FIXTURE), headers: {} } as never;
+        },
+    }) as MockContext;
+    const result = await otxPulses.run(ctx);
+    check(calls.length === 0, 'pulses must not call OTX without a key either');
+    check(/needs a free AlienVault OTX API key/.test(String((result as { summary?: string }).summary)), 'and must say so');
 }
 
 if (fail.length) {

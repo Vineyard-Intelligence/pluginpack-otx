@@ -19,13 +19,14 @@
 // callers), which is why it is not used here rather than used and quietly failing.
 import { definePluginPack } from './sdk';
 import { otxPulses } from './pulses';
+import { otxPassiveDns } from './passive-dns';
 
 export default definePluginPack({
     identifier: 'run.vineyard.pluginpacks.otx',
     content_type: 'vineyard:pluginpack',
     name: 'AlienVault OTX',
-    version: '1.0.0',
+    version: '1.1.0',
     description:
         'Pulls the OTX threat reports ("pulses") that name a selected IP, domain, URL, file hash or CVE, and stages each as a campaign with the ATT&CK techniques, malware families and actor it records. Runs without an API key; an optional free key removes the anonymous rate limit.',
-    plugins: [otxPulses],
+    plugins: [otxPulses, otxPassiveDns],
 });

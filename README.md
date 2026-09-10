@@ -13,7 +13,14 @@ Every other keyless source here answers *what is this address*. OTX answers *who
 it, and what did they say it was part of* — an indicator arrives already connected to a named
 report, so a bare IP becomes a campaign, a technique and a malware family in one hop.
 
-## The API key is optional, and it buys throughput — not data
+Two plugins:
+
+- **OTX Pulses** — the reports that name an indicator, as campaigns with their ATT&CK techniques,
+  malware families and actor.
+- **OTX Passive DNS** — what a name resolved to and *when*, and backwards from an IP, every hostname
+  seen pointing at it.
+
+## The API key is required, and it buys throughput — not data
 
 Two separate measurements, and conflating them is easy:
 
@@ -23,12 +30,37 @@ Two separate measurements, and conflating them is easy:
   (HTTP 429, no `Retry-After`, no rate headers). Measured at the same instant: an anonymous burst was
   refused **25 out of 25** while keyed requests returned 200, and a keyed burst of 20 ran clean.
 
-So the plugin works with no key for a few nodes at a time, and a free OTX key is what lets a
-selection of any size finish. A throttled lookup is reported as **throttled** — never as "nothing
-known", which would turn a rate limit into a false negative on every remaining node.
+The key was optional at first, on the grounds that the data is identical. That reading was right
+about the response and wrong about the product: *works, then stops after six nodes* is not a working
+plugin, it is one that produces a partial answer with no signal that the answer is partial. A key is
+free and takes a minute. Being told so up front beats discovering it as a half-collected graph.
 
-`/passive_dns` is the one endpoint where a key changes the answer outright (it refuses anonymous
-callers), which is why it is not used here rather than used and quietly failing.
+A throttled lookup is still reported as **throttled** — never as "nothing known", which would turn a
+rate limit into a false negative on every remaining node.
+
+`/passive_dns` refuses anonymous callers outright, so requiring a key is also what makes the second
+plugin possible at all.
+
+## Passive DNS: the dates, and the reverse direction
+
+Certificate Transparency finds subdomains, Shodan resolves a name, Domain Recon reads today's A
+record — all of them answer *now*. Passive DNS answers *since when, and until when*, which is what
+separates infrastructure a subject still uses from infrastructure they had abandoned before the
+events under investigation. The dates go on the edge label, because that is what a reader sees.
+
+Given an IP it runs backwards: every hostname observed pointing at that address. Nothing else
+installed here does that.
+
+Two traps it defends against, both measured:
+
+- **`NXDOMAIN` appears in the address field** — 14 of 120 records for `mail.ru`. It is the resolver's
+  answer, not a host. Left in, every domain whose lookup ever failed converges on one node called
+  NXDOMAIN. On an A record the address check rejects it anyway; on a **CNAME** the target is a
+  hostname, so "not an IP" is satisfied and it sails through into a domain node. That path is what
+  the sentinel list is for.
+- **Which field is the discovery depends on the direction.** A record is always (hostname →
+  address). Query a domain and `address` is the finding; query an IP and `address` **is the seed**,
+  repeated on all 500 rows, while `hostname` is the finding.
 
 ## `domain` and `hostname` are different namespaces in OTX
 

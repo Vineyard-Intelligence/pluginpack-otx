@@ -105,7 +105,7 @@ export const otxPulses = definePlugin({
         name: 'OTX Pulses',
         version: '1.0.0',
         description:
-            'Fetches the AlienVault OTX reports ("pulses") that name each selected IP, domain, URL, file hash or CVE, and stages the substantial ones as campaigns — with their ATT&CK techniques, malware families and named adversary. Runs without an API key: a key returns the same pulses, it only removes the anonymous rate limit, so add one for anything bigger than a handful of nodes. Community-published pulses are claims, not observations; the run drops scratch pulses and bulk feed dumps and says how many it dropped.',
+            'Fetches the AlienVault OTX reports ("pulses") that name each selected IP, domain, URL, file hash or CVE, and stages the substantial ones as campaigns — with their ATT&CK techniques, malware families and named adversary. Needs a free OTX API key: the key does not change the data, it is what stops OTX cutting the run off after a few indicators. Community-published pulses are claims, not observations; the run drops scratch pulses and bulk feed dumps and says how many it dropped.',
         icon: 'radar',
         author: { name: 'VINEYARD', url: 'https://vineyard.run' },
         license: 'Apache-2.0',
@@ -149,11 +149,11 @@ export const otxPulses = definePlugin({
             config: [
                 {
                     key: 'api_key',
-                    label: 'OTX API key (optional \u2014 removes the anonymous rate limit)',
+                    label: 'OTX API key',
                     type: 'string',
                     secret: true,
                     scope: 'user',
-                    optional: true,
+                    optional: false,
                 },
             ],
             network: [
@@ -175,15 +175,25 @@ export const otxPulses = definePlugin({
 
         const maxIndicators = Number(ctx.params?.max_pulse_indicators ?? 1000) || 1000;
 
-        // OPTIONAL, AND THE REASON IS THE RATE LIMIT RATHER THAN THE DATA. Measured 2026-09-10: the
-        // same indicator returns the same pulses with and without a key, so a key buys no extra
-        // intelligence. What it buys is throughput — anonymous callers are cut off after a handful
-        // of requests (HTTP 429, no Retry-After, no rate headers) while keyed requests succeed at
-        // the same instant, and a keyed burst of 20 ran clean against an anonymous burst that was
-        // refused 25 times out of 25. So: no key works for a few nodes at a time; a free key is what
-        // makes a selection of any size finish.
+        // REQUIRED, AND THE REASON IS THE RATE LIMIT RATHER THAN THE DATA. Measured 2026-09-10: the
+        // same indicator returns the same pulses with and without a key, so a key reveals nothing
+        // extra. What it buys is a run that finishes — anonymous callers are cut off after a handful
+        // of requests (HTTP 429, no Retry-After, no rate headers), and at the same instant an
+        // anonymous burst was refused 25 times out of 25 while a keyed burst of 20 ran clean.
+        //
+        // It was optional first, on the grounds that the data is identical. That reading was right
+        // about the response and wrong about the product: "works, then stops after six nodes" is not
+        // a working plugin, it is one that produces a partial answer and no signal that the answer
+        // is partial. A key is free and takes a minute; being told so up front beats discovering it
+        // as a half-collected graph.
         const apiKey = String(ctx.config?.api_key ?? '').trim();
-        const headers = apiKey ? { 'X-OTX-API-KEY': apiKey } : undefined;
+        if (!apiKey)
+            return {
+                summary:
+                    'This plugin needs a free AlienVault OTX API key. Without one OTX cuts the run off after a few indicators, which produces a partly-collected graph that looks complete. Sign in at otx.alienvault.com, copy the key from your profile settings, and paste it into this plugin’s settings.',
+                counts: { campaigns: 0 },
+            };
+        const headers = { 'X-OTX-API-KEY': apiKey };
 
         let looked = 0;
         let clean = 0; // OTX knows the indicator and has nothing on it
@@ -375,9 +385,7 @@ export const otxPulses = definePlugin({
         if (limited)
             parts.push(
                 `${limited} lookup(s) were REFUSED BY THE RATE LIMIT, not answered — those indicators are unknown, not clean. ` +
-                    (apiKey
-                        ? 'Even with a key; wait and re-run the remaining nodes.'
-                        : 'Add a free OTX API key in this plugin\u2019s settings: it does not change the data, it removes the anonymous throttle.'),
+                    'Wait and re-run the remaining nodes.',
             );
         if (failed) parts.push(`${failed} lookup(s) failed`);
         return {
