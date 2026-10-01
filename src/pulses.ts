@@ -88,9 +88,9 @@ export const otxPulses = definePlugin({
         identifier: 'run.vineyard.plugins.otx_pulses',
         content_type: 'vineyard:plugin',
         name: 'OTX Pulses',
-        version: '1.1.0',
+        version: '1.1.1',
         description:
-            'Fetches the AlienVault OTX reports ("pulses") that name each selected IP, domain, URL, file hash or CVE, and stages the substantial ones as campaigns — with their ATT&CK techniques, malware families and named adversary. Needs a free OTX API key: the key does not change the data, it is what stops OTX cutting the run off after a few indicators. Community-published pulses are claims, not observations; the run drops scratch pulses and bulk feed dumps and says how many it dropped.',
+            'Fetches the AlienVault OTX pulses that name each selected IP Address, Domain, URL, File Hash or Vulnerability (CVE) and adds each as a Campaign node linked by "reported in"; its ATT&CK techniques and malware families become Attack Pattern and Malware nodes ("uses"), its adversary a Threat Actor ("attributed to"). Skips pulses without a description or with more than max_pulse_indicators (default 1000) indicators. Requires a free OTX API key.',
         icon: 'radar',
         author: { name: 'VINEYARD', url: 'https://vineyard.run' },
         license: 'Apache-2.0',

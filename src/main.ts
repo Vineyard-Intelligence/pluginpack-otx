@@ -25,8 +25,8 @@ export default definePluginPack({
     identifier: 'run.vineyard.pluginpacks.otx',
     content_type: 'vineyard:pluginpack',
     name: 'AlienVault OTX',
-    version: '1.2.0',
+    version: '1.2.1',
     description:
-        'Pulls the OTX threat reports ("pulses") that name a selected IP, domain, URL, file hash or CVE, and stages each as a campaign with the ATT&CK techniques, malware families and actor it records. Runs without an API key; an optional free key removes the anonymous rate limit.',
+        'Looks up selected indicators in AlienVault OTX: the threat reports ("pulses") that name them, and passive DNS history. Requires a free OTX API key.',
     plugins: [otxPulses, otxPassiveDns],
 });
