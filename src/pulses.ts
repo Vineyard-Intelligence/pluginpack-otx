@@ -88,7 +88,7 @@ export const otxPulses = definePlugin({
         identifier: 'run.vineyard.plugins.otx_pulses',
         content_type: 'vineyard:plugin',
         name: 'OTX Pulses',
-        version: '1.1.1',
+        version: '1.1.2',
         description:
             'Fetches the AlienVault OTX pulses that name each selected IP Address, Domain, URL, File Hash or Vulnerability (CVE) and adds each as a Campaign node linked by "reported in"; its ATT&CK techniques and malware families become Attack Pattern and Malware nodes ("uses"), its adversary a Threat Actor ("attributed to"). Skips pulses without a description or with more than max_pulse_indicators (default 1000) indicators. Requires a free OTX API key.',
         icon: 'radar',
@@ -119,11 +119,10 @@ export const otxPulses = definePlugin({
             properties: {
                 max_pulse_indicators: {
                     type: 'integer',
-                    title: 'Skip pulses larger than this many indicators',
+                    title: 'Max indicators per pulse',
                     default: 1000,
                     minimum: 1,
-                    description:
-                        'A pulse holding thousands of indicators is a feed dump rather than a report, and linking to it makes a hub that every address in that feed joins — which reads as a discovery and is not one. The measured worst case on one ordinary IP held 24,876. Raise this only when you specifically want the wide ones.',
+                    description: 'Pulses with more indicators than this are skipped. Default 1000.',
                 },
             },
         },
@@ -145,7 +144,7 @@ export const otxPulses = definePlugin({
                 {
                     endpoint: 'https://otx.alienvault.com/api/v1/indicators',
                     methods: ['GET'],
-                    purpose: 'Fetch the OTX pulses that reference an indicator (keyless; OTX sends CORS).',
+                    purpose: 'Fetch the OTX pulses that reference each selected indicator.',
                 },
             ],
         },
