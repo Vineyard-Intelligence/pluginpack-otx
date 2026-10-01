@@ -2,7 +2,7 @@
   "identifier": "run.vineyard.pluginpacks.otx",
   "content_type": "vineyard:pluginpack",
   "name": "AlienVault OTX",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Looks up selected indicators in AlienVault OTX: the threat reports (\"pulses\") that name them, and passive DNS history. Requires a free OTX API key.",
   "author": {
     "name": "VINEYARD",
@@ -25,7 +25,7 @@
   "distribution": {
     "kind": "git",
     "repository": "https://github.com/Vineyard-Intelligence/pluginpack-otx",
-    "ref": "v1.2.1",
+    "ref": "v1.2.2",
     "path": "plugins/otx.manifest.json"
   },
   "plugins": [
@@ -33,7 +33,7 @@
       "identifier": "run.vineyard.plugins.otx_pulses",
       "content_type": "vineyard:plugin",
       "name": "OTX Pulses",
-      "version": "1.1.1",
+      "version": "1.1.2",
       "description": "Fetches the AlienVault OTX pulses that name each selected IP Address, Domain, URL, File Hash or Vulnerability (CVE) and adds each as a Campaign node linked by \"reported in\"; its ATT&CK techniques and malware families become Attack Pattern and Malware nodes (\"uses\"), its adversary a Threat Actor (\"attributed to\"). Skips pulses without a description or with more than max_pulse_indicators (default 1000) indicators. Requires a free OTX API key.",
       "icon": "radar",
       "license": "Apache-2.0",
@@ -105,10 +105,10 @@
         "properties": {
           "max_pulse_indicators": {
             "type": "integer",
-            "title": "Skip pulses larger than this many indicators",
+            "title": "Max indicators per pulse",
             "default": 1000,
             "minimum": 1,
-            "description": "A pulse holding thousands of indicators is a feed dump rather than a report, and linking to it makes a hub that every address in that feed joins — which reads as a discovery and is not one. The measured worst case on one ordinary IP held 24,876. Raise this only when you specifically want the wide ones."
+            "description": "Pulses with more indicators than this are skipped. Default 1000."
           }
         }
       },
@@ -134,7 +134,7 @@
             "methods": [
               "GET"
             ],
-            "purpose": "Fetch the OTX pulses that reference an indicator (keyless; OTX sends CORS)."
+            "purpose": "Fetch the OTX pulses that reference each selected indicator."
           }
         ]
       },
@@ -151,7 +151,7 @@
       "identifier": "run.vineyard.plugins.otx_passive_dns",
       "content_type": "vineyard:plugin",
       "name": "OTX Passive DNS",
-      "version": "1.1.1",
+      "version": "1.1.2",
       "description": "Reads OTX passive DNS for each selected Domain or IP Address. A domain gets the subdomains in its records as Domain nodes (\"subdomain\"), and each name gets the IP Address nodes it resolved to (\"resolved to\") and its CNAME targets as Domain nodes (\"aliased to\"); an IP gets the Domain nodes that resolved to it. Edge labels carry the first/last-seen dates; the newest max_records (default 50) A, AAAA and CNAME records are taken per indicator. Requires a free OTX API key.",
       "icon": "history",
       "license": "Apache-2.0",
@@ -198,10 +198,10 @@
         "properties": {
           "max_records": {
             "type": "integer",
-            "title": "Records to take per indicator",
+            "title": "Max records per indicator",
             "default": 50,
             "minimum": 1,
-            "description": "OTX returns hundreds — mail.ru has 556, 8.8.8.8 has 500 hostnames that mostly belong to strangers who misconfigured their DNS. Taking them all makes a hub rather than a finding. The newest are kept, and the run says how many it left behind."
+            "description": "Maximum A, AAAA and CNAME records taken per selected Domain or IP address, newest first. Default 50."
           }
         }
       },
@@ -227,7 +227,7 @@
             "methods": [
               "GET"
             ],
-            "purpose": "Read an indicator's passively-observed DNS history."
+            "purpose": "Read the passive DNS history of each selected Domain or IP address."
           }
         ]
       },

@@ -44,7 +44,7 @@ export const otxPassiveDns = definePlugin({
         identifier: 'run.vineyard.plugins.otx_passive_dns',
         content_type: 'vineyard:plugin',
         name: 'OTX Passive DNS',
-        version: '1.1.1',
+        version: '1.1.2',
         description:
             'Reads OTX passive DNS for each selected Domain or IP Address. A domain gets the subdomains in its records as Domain nodes ("subdomain"), and each name gets the IP Address nodes it resolved to ("resolved to") and its CNAME targets as Domain nodes ("aliased to"); an IP gets the Domain nodes that resolved to it. Edge labels carry the first/last-seen dates; the newest max_records (default 50) A, AAAA and CNAME records are taken per indicator. Requires a free OTX API key.',
         icon: 'history',
@@ -70,11 +70,11 @@ export const otxPassiveDns = definePlugin({
             properties: {
                 max_records: {
                     type: 'integer',
-                    title: 'Records to take per indicator',
+                    title: 'Max records per indicator',
                     default: 50,
                     minimum: 1,
                     description:
-                        'OTX returns hundreds — mail.ru has 556, 8.8.8.8 has 500 hostnames that mostly belong to strangers who misconfigured their DNS. Taking them all makes a hub rather than a finding. The newest are kept, and the run says how many it left behind.',
+                        'Maximum A, AAAA and CNAME records taken per selected Domain or IP address, newest first. Default 50.',
                 },
             },
         },
@@ -87,7 +87,7 @@ export const otxPassiveDns = definePlugin({
                 {
                     endpoint: 'https://otx.alienvault.com/api/v1/indicators',
                     methods: ['GET'],
-                    purpose: "Read an indicator's passively-observed DNS history.",
+                    purpose: "Read the passive DNS history of each selected Domain or IP address.",
                 },
             ],
         },
