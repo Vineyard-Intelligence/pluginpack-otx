@@ -44,9 +44,9 @@ export const otxPassiveDns = definePlugin({
         identifier: 'run.vineyard.plugins.otx_passive_dns',
         content_type: 'vineyard:plugin',
         name: 'OTX Passive DNS',
-        version: '1.1.0',
+        version: '1.1.1',
         description:
-            "Reads OTX's passively-observed DNS history for each selected domain or IP: which addresses a name resolved to and when, and — running backwards from an IP — every hostname seen pointing at it. The dates are the point: they separate infrastructure a subject still uses from infrastructure they had already abandoned. Needs a free OTX API key.",
+            'Reads OTX passive DNS for each selected Domain or IP Address. A domain gets the subdomains in its records as Domain nodes ("subdomain"), and each name gets the IP Address nodes it resolved to ("resolved to") and its CNAME targets as Domain nodes ("aliased to"); an IP gets the Domain nodes that resolved to it. Edge labels carry the first/last-seen dates; the newest max_records (default 50) A, AAAA and CNAME records are taken per indicator. Requires a free OTX API key.',
         icon: 'history',
         author: { name: 'VINEYARD', url: 'https://vineyard.run' },
         license: 'Apache-2.0',

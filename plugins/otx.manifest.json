@@ -2,8 +2,8 @@
   "identifier": "run.vineyard.pluginpacks.otx",
   "content_type": "vineyard:pluginpack",
   "name": "AlienVault OTX",
-  "version": "1.2.0",
-  "description": "Pulls the OTX threat reports (\"pulses\") that name a selected IP, domain, URL, file hash or CVE, and stages each as a campaign with the ATT&CK techniques, malware families and actor it records. Runs without an API key; an optional free key removes the anonymous rate limit.",
+  "version": "1.2.1",
+  "description": "Looks up selected indicators in AlienVault OTX: the threat reports (\"pulses\") that name them, and passive DNS history. Requires a free OTX API key.",
   "author": {
     "name": "VINEYARD",
     "url": "https://vineyard.run"
@@ -25,7 +25,7 @@
   "distribution": {
     "kind": "git",
     "repository": "https://github.com/Vineyard-Intelligence/pluginpack-otx",
-    "ref": "v1.2.0",
+    "ref": "v1.2.1",
     "path": "plugins/otx.manifest.json"
   },
   "plugins": [
@@ -33,8 +33,8 @@
       "identifier": "run.vineyard.plugins.otx_pulses",
       "content_type": "vineyard:plugin",
       "name": "OTX Pulses",
-      "version": "1.1.0",
-      "description": "Fetches the AlienVault OTX reports (\"pulses\") that name each selected IP, domain, URL, file hash or CVE, and stages the substantial ones as campaigns — with their ATT&CK techniques, malware families and named adversary. Needs a free OTX API key: the key does not change the data, it is what stops OTX cutting the run off after a few indicators. Community-published pulses are claims, not observations; the run drops scratch pulses and bulk feed dumps and says how many it dropped.",
+      "version": "1.1.1",
+      "description": "Fetches the AlienVault OTX pulses that name each selected IP Address, Domain, URL, File Hash or Vulnerability (CVE) and adds each as a Campaign node linked by \"reported in\"; its ATT&CK techniques and malware families become Attack Pattern and Malware nodes (\"uses\"), its adversary a Threat Actor (\"attributed to\"). Skips pulses without a description or with more than max_pulse_indicators (default 1000) indicators. Requires a free OTX API key.",
       "icon": "radar",
       "license": "Apache-2.0",
       "platforms": {
@@ -151,8 +151,8 @@
       "identifier": "run.vineyard.plugins.otx_passive_dns",
       "content_type": "vineyard:plugin",
       "name": "OTX Passive DNS",
-      "version": "1.1.0",
-      "description": "Reads OTX's passively-observed DNS history for each selected domain or IP: which addresses a name resolved to and when, and — running backwards from an IP — every hostname seen pointing at it. The dates are the point: they separate infrastructure a subject still uses from infrastructure they had already abandoned. Needs a free OTX API key.",
+      "version": "1.1.1",
+      "description": "Reads OTX passive DNS for each selected Domain or IP Address. A domain gets the subdomains in its records as Domain nodes (\"subdomain\"), and each name gets the IP Address nodes it resolved to (\"resolved to\") and its CNAME targets as Domain nodes (\"aliased to\"); an IP gets the Domain nodes that resolved to it. Edge labels carry the first/last-seen dates; the newest max_records (default 50) A, AAAA and CNAME records are taken per indicator. Requires a free OTX API key.",
       "icon": "history",
       "license": "Apache-2.0",
       "platforms": {
