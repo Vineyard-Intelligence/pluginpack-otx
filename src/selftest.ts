@@ -113,6 +113,18 @@ const typed = (ctx: MockContext, t: string) => ctx.mock.createdNodes.filter((n) 
     check(new Set(tech).size === tech.length, 'a technique named by two pulses must be one node, not two');
     const mw = typed(ctx, 'threat.malware').map((n) => String(n.data.name));
     check(mw.includes('Mirai'), `Mirai is in the fixture's malware_families, got [${mw.join(', ')}]`);
+    // The host refuses a create missing a required field and the whole run is discarded, so each
+    // produced type must carry what the threat typepack marks optional: false.
+    const REQUIRED: Record<string, string[]> = {
+        'threat.campaign': ['campaign_name'],
+        'threat.attack_pattern': ['name'],
+        'threat.malware': ['name', 'malware_type'],
+        'threat.threat_actor': ['actor_name'],
+    };
+    for (const n of ctx.mock.createdNodes)
+        for (const k of REQUIRED[n.type] ?? [])
+            check(n.data[k] != null && n.data[k] !== '', `${n.type} is missing required ${k}: ${JSON.stringify(n.data)}`);
+    check(typed(ctx, 'threat.malware').every((n) => n.data.malware_type === 'unknown'), 'OTX gives no malware type, so it is "unknown", not guessed');
     check(typed(ctx, 'threat.threat_actor').length === 0, 'no pulse in the fixture names an adversary, so no actor may be invented');
 
     const edges = ctx.mock.createdEdges;
