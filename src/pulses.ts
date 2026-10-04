@@ -88,7 +88,7 @@ export const otxPulses = definePlugin({
         identifier: 'run.vineyard.plugins.otx_pulses',
         content_type: 'vineyard:plugin',
         name: 'OTX Pulses',
-        version: '1.1.2',
+        version: '1.1.3',
         description:
             'Fetches the AlienVault OTX pulses that name each selected IP Address, Domain, URL, File Hash or Vulnerability (CVE) and adds each as a Campaign node linked by "reported in"; its ATT&CK techniques and malware families become Attack Pattern and Malware nodes ("uses"), its adversary a Threat Actor ("attributed to"). Skips pulses without a description or with more than max_pulse_indicators (default 1000) indicators. Requires a free OTX API key.',
         icon: 'radar',
@@ -341,7 +341,12 @@ export const otxPulses = definePlugin({
                     const fam = familyName(m);
                     if (!fam) continue;
                     const mwId = await reuse(malwareNode, fam.toLowerCase(), () =>
-                        ctx.graph!.createNode!({ type: 'threat.malware', data: { name: fam, is_family: true } }),
+                        // malware_type is required by the typepack and OTX gives no classification,
+                        // so 'unknown' rather than a guess from the family name.
+                        ctx.graph!.createNode!({
+                            type: 'threat.malware',
+                            data: { name: fam, malware_type: 'unknown', is_family: true },
+                        }),
                     );
                     await ctx.graph!.createEdge!({ from: campaignId, to: mwId, label: 'uses' });
                 }
