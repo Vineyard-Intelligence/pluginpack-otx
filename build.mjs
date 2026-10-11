@@ -9,13 +9,31 @@
  * Usage: node build.mjs
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const outDir = join(here, 'dist');
 mkdirSync(outDir, { recursive: true });
+
+// tldts and tldts-core are inlined into the bundle, and their MIT licence requires its copyright and
+// permission notice in every copy. The bundle is fetched on its own by URL, so the notice goes at
+// its top, read from the installed package so it follows the version actually bundled.
+// THIRD_PARTY_NOTICES.md carries the same text for anyone reading the repo.
+const tldtsDir = join(here, 'node_modules', 'tldts');
+const tldtsVersion = JSON.parse(readFileSync(join(tldtsDir, 'package.json'), 'utf8')).version;
+const tldtsLicense = readFileSync(join(tldtsDir, 'LICENSE'), 'utf8').trim();
+const banner = [
+    '/*!',
+    ` * Includes tldts and tldts-core ${tldtsVersion} (https://github.com/remusao/tldts), MIT licence:`,
+    ' *',
+    ...tldtsLicense.split('\n').map((l) => ` * ${l}`.trimEnd()),
+    ' *',
+    ' * tldts embeds the Public Suffix List (https://publicsuffix.org/), MPL-2.0;',
+    ' * source: https://publicsuffix.org/list/public_suffix_list.dat',
+    ' */',
+].join('\n');
 
 execFileSync(
     'npx',
@@ -28,6 +46,7 @@ execFileSync(
         '--platform=browser',
         '--minify',
         '--legal-comments=inline',
+        `--banner:js=${banner}`,
         '--log-level=warning',
         `--outfile=${join(outDir, 'pack.mjs')}`,
     ],

@@ -58,6 +58,7 @@ registrable domain (a suffix newer than the bundled list), both endpoints are tr
 Apache-2.0, and the bundle carries [`tldts`](https://github.com/remusao/tldts) (MIT), which embeds
 the Mozilla [Public Suffix List](https://publicsuffix.org/) (MPL-2.0). Both are dependencies
 declared in `package.json` and inlined by the build; sources are at their respective projects.
+Their notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and at the top of `dist/pack.mjs`.
 
 ## The filter is the plugin
 
