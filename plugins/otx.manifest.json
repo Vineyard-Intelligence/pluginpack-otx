@@ -18,15 +18,8 @@
     },
     "desktop": {
       "runtime": "sandbox-js",
-      "entry": "dist/pack.mjs",
-      "min_app_version": "0.1.0"
+      "entry": "dist/pack.mjs"
     }
-  },
-  "distribution": {
-    "kind": "git",
-    "repository": "https://github.com/Vineyard-Intelligence/pluginpack-otx",
-    "ref": "v1.2.4",
-    "path": "plugins/otx.manifest.json"
   },
   "plugins": [
     {
@@ -45,8 +38,7 @@
         },
         "desktop": {
           "runtime": "sandbox-js",
-          "entry": "dist/pack.mjs",
-          "min_app_version": "0.1.0"
+          "entry": "dist/pack.mjs"
         }
       },
       "io": {
@@ -163,8 +155,7 @@
         },
         "desktop": {
           "runtime": "sandbox-js",
-          "entry": "dist/pack.mjs",
-          "min_app_version": "0.1.0"
+          "entry": "dist/pack.mjs"
         }
       },
       "io": {

@@ -62,24 +62,12 @@ console.log('Built dist/pack.mjs');
 // moment one of them changes. The registry pins a commit and CI re-fetches the manifest to check
 // it, so a drifted manifest is not a cosmetic problem: it is the document the marketplace shows
 // and the install plan reads, describing code that does something else.
-//
-// The one field the source cannot supply is `entry`: in-source it reads 'inline' because the
-// plugin is defined in the same module, while the published manifest must point at the built
-// bundle the loader fetches.
 import { writeFileSync } from 'node:fs';
 
 const pack = (await import(join(outDir, 'pack.mjs'))).default;
-const ENTRY = 'dist/pack.mjs';
 // `author` is a PACK-level field; the schema rejects it on a nested plugin. It stays in the
 // source manifests because definePlugin's type carries it and it documents the plugin in place.
-const withEntry = ({ author, ...m }) => ({
-    ...m,
-    platforms: {
-        ...m.platforms,
-        web: { ...m.platforms.web, entry: ENTRY },
-        desktop: { ...m.platforms.desktop, entry: ENTRY },
-    },
-});
+const member = ({ author, ...m }) => m;
 
 const first = pack.plugins[0].manifest;
 const manifest = {
@@ -91,14 +79,8 @@ const manifest = {
     author: first.author,
     license: first.license,
     icon: 'radar',
-    platforms: withEntry(first).platforms,
-    distribution: {
-        kind: 'git',
-        repository: 'https://github.com/Vineyard-Intelligence/pluginpack-otx',
-        ref: `v${pack.version}`,
-        path: 'plugins/otx.manifest.json',
-    },
-    plugins: pack.plugins.map((p) => withEntry(p.manifest)),
+    platforms: first.platforms,
+    plugins: pack.plugins.map((p) => member(p.manifest)),
 };
 
 const manifestPath = join(here, 'plugins', 'otx.manifest.json');

@@ -82,7 +82,6 @@ export interface PluginManifest {
         desktop?: {
             runtime: 'sandbox-js' | 'native' | 'subprocess';
             entry: string;
-            min_app_version?: string;
             fallback?: string;
         };
     };
@@ -102,7 +101,6 @@ export interface PluginManifest {
         progress?: 'none' | 'determinate' | 'indeterminate';
         persistence?: 'ephemeral' | 'opt-in' | 'always';
     };
-    distribution?: Record<string, any>;
 }
 export interface TypeRef {
     typepack: string;
@@ -135,9 +133,7 @@ export interface EdgeDraft {
     to: string;
     /**
      * NO `type`. An edge states its relationship in `label`, in prose — "resolved to this address
-     * on 2026-02-01" rather than a qualified `edge_types[]` key. The column that would have held
-     * the key is gone (core migration 0024) and packs' `edge_types[]` declarations are read by
-     * nothing, which is a product decision rather than a gap to fill in.
+     * on 2026-02-01" rather than a typed key. That is a product decision rather than a gap to fill in.
      */
     label: string;
     /**
@@ -228,7 +224,7 @@ export interface HostContext {
          *     a caller holding an edge id could read it and delete it but not amend it — it had to
          *     resolve back to two node ids first.
          *  2. RE-GRADING. Commit discards the stored grade whenever the label is restated, on the
-         *     stated grounds that the old grade was about wording that no longer exists. A writer
+         *     stated grounds that the stored grade was about the wording being replaced. A writer
          *     that only wants to record a field would have been forced to restate the label to get
          *     there, and would have triggered that discard as a side effect of having no other
          *     route. Omit `label` here and the grade stands.
@@ -328,10 +324,10 @@ export interface MockContextOptions {
     /**
      * Values the ANALYST configured, as `ctx.config` sees them.
      *
-     * Missing here until a pack needed to prove it sends an API key only when one is set. Four
-     * shipped packs read ctx.config (github, shodan, virustotal, otx) and none of them could test
-     * that path through this harness: without it every mock run looks like an unconfigured install,
-     * so "the key header is attached" and "the key header is never invented" were both unreachable.
+     * Lets a pack prove it sends an API key only when one is set. Four packs read ctx.config
+     * (github, shodan, virustotal, otx), and without this field every mock run looks like an
+     * unconfigured install, so "the key header is attached" and "the key header is never invented"
+     * would both be unreachable through this harness.
      * Mock values only — a real secret never comes near this file.
      */
     config?: Record<string, string | number | boolean>;
