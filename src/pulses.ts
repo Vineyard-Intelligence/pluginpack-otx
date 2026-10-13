@@ -96,8 +96,8 @@ export const otxPulses = definePlugin({
         license: 'Apache-2.0',
         platforms: {
             primary: 'web',
-            web: { runtime: 'sandbox-js', entry: 'inline' },
-            desktop: { runtime: 'sandbox-js', entry: 'inline', min_app_version: '0.1.0' },
+            web: { runtime: 'sandbox-js', entry: 'dist/pack.mjs' },
+            desktop: { runtime: 'sandbox-js', entry: 'dist/pack.mjs' },
         },
         io: {
             consumes: [
