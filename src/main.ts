@@ -6,17 +6,18 @@
 // families it dropped, and sometimes the actor. Every other keyless source answers "what is this
 // address"; this one answers "who has written about it, and what did they say it was part of".
 //
-// THE API KEY IS OPTIONAL, AND IT BUYS THROUGHPUT RATHER THAN DATA. Two measurements, and running
-// them together is how the wrong conclusion gets drawn. The DATA is identical: the same indicator
-// returns the same pulses with and without a key — 26 either way, identical top-level keys, one
-// byte of difference. The RATE LIMIT is not identical at all: anonymous callers are cut off after a
-// handful of requests, and at the same instant an anonymous burst was refused 25 times out of 25
-// while keyed requests returned 200. So the pack declares the key OPTIONAL and secret — it works
-// without one for a few nodes, and a free key is what lets a large selection finish. A throttled
-// lookup is reported as throttled, never as "nothing known".
+// THE API KEY IS REQUIRED (since 1.1.0), AND WHAT IT BUYS IS A RUN THAT FINISHES. Two measurements,
+// and running them together is how the wrong conclusion gets drawn. The DATA is identical: the same
+// indicator returns the same pulses with and without a key — 26 either way, identical top-level
+// keys, one byte of difference. The RATE LIMIT is not identical at all: anonymous callers are cut
+// off after a handful of requests, and at the same instant an anonymous burst was refused 25 times
+// out of 25 while keyed requests returned 200. The key was optional first, on the strength of the
+// first measurement; "works, then stops after six nodes" is a partial answer with no sign that it is
+// partial, so both plugins now ask for the (free) key before they start (pulses.ts says more). A
+// throttled lookup is reported as throttled, never as "nothing known".
 //
 // `/passive_dns` is the one endpoint where a key changes the answer outright (it refuses anonymous
-// callers), which is why it is not used here rather than used and quietly failing.
+// callers). With the key required anyway, OTX Passive DNS (passive-dns.ts) uses it.
 import { definePluginPack } from './sdk';
 import { otxPulses } from './pulses';
 import { otxPassiveDns } from './passive-dns';
