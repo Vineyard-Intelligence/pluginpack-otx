@@ -88,6 +88,7 @@ const manifest = {
     content_type: 'vineyard:pluginpack',
     name: pack.name,
     version: pack.version,
+    summary: pack.summary,
     description: pack.description,
     author: first.author,
     license: first.license,
