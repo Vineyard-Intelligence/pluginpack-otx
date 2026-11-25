@@ -46,7 +46,7 @@ export default definePluginPack({
     identifier: 'run.vineyard.pluginpacks.otx',
     content_type: 'vineyard:pluginpack',
     name: 'AlienVault OTX',
-    version: '1.3.1',
+    version: '1.4.0',
     summary:
         'Looks up selected indicators in AlienVault OTX: the threat reports ("pulses") that name them, and passive DNS history. Requires a free OTX API key.',
     description: PACK_PAGE,

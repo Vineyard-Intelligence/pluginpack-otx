@@ -1,6 +1,6 @@
 // OTX Pulses — indicator → the reports that name it.
 import { definePlugin } from './sdk';
-import type { HostContext, RunResult, GraphNode } from './sdk';
+import type { HostContext, RunResult, GraphNode, SafeResponse } from './sdk';
 import { domainPaths } from './indicator-type';
 
 const BASE = 'https://otx.alienvault.com/api/v1/indicators';
@@ -78,6 +78,39 @@ function usable(p: Pulse, maxIndicators: number): 'ok' | 'no_description' | 'too
     if ((p.description ?? '').trim().length < MIN_DESCRIPTION) return 'no_description';
     if ((p.indicator_count ?? 0) > maxIndicators) return 'too_broad';
     return 'ok';
+}
+
+/** Refusals already logged in this run, so a budget refusal over a long selection is one line. */
+const keepNoted = new WeakMap<HostContext, Set<string>>();
+
+/**
+ * Keep a call's raw answer on the node it describes (plugin raw results, spec §5). Every call site
+ * goes through here, for three reasons:
+ *   - desktop builds before ctx.retain have none, and a bare call there is a TypeError that would
+ *     fail a run that otherwise works, so the check is `typeof`, not truthiness;
+ *   - only status, response headers and body are handed over, built afresh: nothing about the
+ *     request (the URL with the indicator in it, the X-OTX-API-KEY header) can ride along on a
+ *     response object the host would have to trust;
+ *   - a refusal (over budget, a config value seen in the body) or a throw costs the raw copy, never
+ *     the run: the mapped nodes are already staged and are what the analyst ran this for.
+ */
+async function keep(ctx: HostContext, nodeId: string, op: string, res: SafeResponse): Promise<void> {
+    if (typeof ctx.retain !== 'function' || !(res.status > 0)) return;
+    let reason = '';
+    try {
+        // The response's own text, not a re-serialised parse, so the host hashes the bytes OTX sent.
+        const body = await res.text();
+        const out = await ctx.retain(nodeId, op, { status: res.status, headers: { ...(res.headers ?? {}) }, body });
+        if (out && out.kept === false) reason = typeof out.reason === 'string' && out.reason ? out.reason : 'refused';
+    } catch {
+        reason = 'the host could not keep it';
+    }
+    if (!reason) return;
+    let noted = keepNoted.get(ctx);
+    if (!noted) keepNoted.set(ctx, (noted = new Set()));
+    if (noted.has(`${op}\0${reason}`)) return;
+    noted.add(`${op}\0${reason}`);
+    ctx.progress?.log?.(`Raw ${op} result not kept — ${reason}`);
 }
 
 const familyName = (m: { id?: string; display_name?: string } | string): string =>
@@ -227,12 +260,24 @@ export const otxPulses = definePlugin({
             let pulses: Pulse[] = [];
             let broke = false;
             let throttled = false;
+            // The one response that IS the answer for this indicator, kept whole as OTX sent it. A
+            // 200 (with or without pulses) beats a 404, since a domain's second endpoint is only
+            // asked when the first said nothing; a 404 stands only when no endpoint answered.
+            let answer: SafeResponse | null = null;
+            // A cancel between a domain's two endpoints leaves a 404 that may not be the answer.
+            let cut = false;
             for (const path of t.paths) {
-                if (ctx.signal?.aborted) break;
+                if (ctx.signal?.aborted) {
+                    cut = true;
+                    break;
+                }
                 try {
                     const res = await ctx.net.fetch(`${BASE}/${path}/general`, { method: 'GET', headers });
                     // 404 is a real answer — OTX has never seen this indicator under this type.
-                    if (res.status === 404) continue;
+                    if (res.status === 404) {
+                        if (!answer) answer = res;
+                        continue;
+                    }
                     // 429 is the anonymous rate limit, and it is NOT an empty result. Counting it as
                     // "nothing known" would turn a throttle into a false negative on every remaining
                     // node of the selection, which is the exact shape this plugin exists to avoid.
@@ -247,6 +292,7 @@ export const otxPulses = definePlugin({
                         break;
                     }
                     const doc = (await res.json()) as { pulse_info?: { count?: number; pulses?: Pulse[] } };
+                    answer = res;
                     const got = doc?.pulse_info?.pulses ?? [];
                     if (got.length) {
                         pulses = got;
@@ -265,6 +311,15 @@ export const otxPulses = definePlugin({
                 failed++;
                 continue;
             }
+            // Kept on the indicator only, op "pulses" (analyst's decision, 2026-11-25). The pulse
+            // list in this answer is what each Campaign below was made from, but a Campaign gets no
+            // copy of its own entry: a slice cut out of this response is no longer the answer OTX
+            // gave, and the "reported in" edge already says where the Campaign came from (spec
+            // §5-3). Kept whole, the answer also still holds the pulses the filter below drops,
+            // which no node carries. A throttled or failed lookup above keeps nothing: it says
+            // something about the account, not about the indicator. A 404 is kept — "OTX has
+            // never seen this" is itself a finding.
+            if (answer && !cut) await keep(ctx, ids[i], 'pulses', answer);
             looked++;
             if (!pulses.length) {
                 clean++;
