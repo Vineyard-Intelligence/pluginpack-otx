@@ -6,12 +6,14 @@
 //
 // Invariants, from the plugin raw results spec (§5):
 //   - OTX Pulses keeps ONE thing per indicator: the final /general answer, whole and as OTX sent it,
-//     on the selected indicator's node, op "pulses". A 404 ("OTX has never seen this") is kept; a
-//     403, a 429 and any other failure are not.
+//     on the selected indicator's node, op "pulses", and only when that answer is a 200 listing at
+//     least one pulse. A 404 and a 200 with no pulses add nothing to the node and are not kept
+//     (analyst's decision, 2026-11-25, reversing 1.4.0, which kept them as findings); neither is a
+//     403, a 429 or any other failure.
 //   - No Campaign (or any other created node) gets a raw result. A slice cut out of the indicator's
 //     answer is not an answer OTX gave (analyst's decision, 2026-11-25).
-//   - For a domain asked under two endpoints, only one response is kept: the 200 if either gave
-//     one, otherwise the 404. Never a body stitched from both.
+//   - For a domain asked under two endpoints, only one response is kept: the one with pulses. If
+//     neither has any, nothing is. Never a body stitched from both.
 //   - Nothing handed to retain carries the API key, its header name or the request URL.
 //   - A refusal object or a throw from retain never fails the run, and is logged once per reason.
 //   - A host without ctx.retain (every desktop build before it) stages exactly the same graph.
@@ -174,10 +176,33 @@ const ip = (id, addr) => ({ id, type: "infrastructure.ip_address", data: { ip_ad
   const t = ctxFor({ nodes, selection: Object.keys(nodes), respond: (url) => byIp[url.match(/IPv4\/([^/]+)\//)[1]] });
   t.ctx.retain = spy;
   const res = await pulsesPlugin.run(t.ctx);
-  check("misses: a 404 and an empty 200 are kept, on their own indicator", spy.calls.map((c) => `${c[0]}:${c[1]}:${c[2].status}`).join() === "i1:pulses:404,i6:pulses:200");
-  check("misses: a 404 keeps OTX's own body", bodyOf(spy.calls[0])?.detail === "Not found.");
+  check("misses: neither a 404 nor a 200 with no pulses is kept", !spy.calls.some((c) => c[0] === "i1" || c[0] === "i6"));
   check("misses: 403, 429, 500 and 401 are not kept", !spy.calls.some((c) => ["i2", "i3", "i4", "i5"].includes(c[0])));
+  check("misses: no retain call at all", spy.calls.length === 0);
   check("misses: the run counts them as before", res.counts.rate_limited === 1 && res.counts.failed === 3 && res.counts.clean === 2);
+  check("misses: and logs nothing about raw results", !t.logs.some((l) => /not kept/.test(l)));
+}
+
+// ---- an empty answer keeps nothing, a non-empty one is kept whole ----------------------------
+{
+  // The case the analyst hit: a 200 whose pulse_info.count is 0 gave an empty review entry.
+  const spy = retainSpy();
+  const one = { ...FIXTURE, pulse_info: { ...FIXTURE.pulse_info, count: 1, pulses: FIXTURE.pulse_info.pulses.slice(0, 1) } };
+  const t = ctxFor({
+    nodes: { e: ip("e", "192.0.2.10"), z: ip("z", "192.0.2.11"), f: ip("f", "192.0.2.12") },
+    selection: ["e", "z", "f"],
+    respond: (url) =>
+      url.includes("192.0.2.10")
+        ? { status: 200, body: { ...EMPTY, indicator: "192.0.2.10", type: "IPv4" } }
+        : url.includes("192.0.2.11")
+        ? { status: 200, body: { indicator: "192.0.2.11", type: "IPv4", pulse_info: { count: 0 } } }
+        : { status: 200, body: one, headers: RESPONSE_HEADERS },
+  });
+  t.ctx.retain = spy;
+  const res = await pulsesPlugin.run(t.ctx);
+  check("empty: count 0 / no pulses keeps nothing, one pulse is kept", spy.calls.map((c) => c[0]).join() === "f");
+  check("empty: the kept one is the whole response text", spy.calls[0]?.[2].status === 200 && spy.calls[0][2].body === JSON.stringify(one));
+  check("empty: both empty answers still count as clean", res.counts.clean === 2);
 }
 
 // ---- a domain asked under two endpoints: one original response, never stitched ---------------
@@ -194,11 +219,16 @@ const ip = (id, addr) => ({ id, type: "infrastructure.ip_address", data: { ip_ad
   let r = await run({ status: 404, body: { detail: "Not found." } }, { status: 200, body: FIXTURE });
   check("domain: hostname 404 then domain 200 keeps the 200 alone", r.t.net.calls.length === 2 && r.spy.calls.length === 1 && r.spy.calls[0][2].status === 200 && r.spy.calls[0][2].body === JSON.stringify(FIXTURE));
   r = await run({ status: 200, body: EMPTY }, { status: 404, body: { detail: "Not found." } });
-  check("domain: an empty 200 then a 404 keeps the 200", r.spy.calls.length === 1 && r.spy.calls[0][2].status === 200 && bodyOf(r.spy.calls[0])?.pulse_info?.count === 0);
+  r = await run({ status: 200, body: EMPTY }, { status: 200, body: FIXTURE });
+  check("domain: an empty 200 then a 200 with pulses keeps the second alone", r.t.net.calls.length === 2 && r.spy.calls.length === 1 && r.spy.calls[0][2].body === JSON.stringify(FIXTURE));
+  r = await run({ status: 200, body: EMPTY }, { status: 404, body: { detail: "Not found." } });
+  check("domain: an empty 200 then a 404 keeps nothing", r.t.net.calls.length === 2 && r.spy.calls.length === 0);
+  r = await run({ status: 200, body: EMPTY }, { status: 200, body: { ...EMPTY, indicator: "other" } });
+  check("domain: two empty 200s keep nothing", r.t.net.calls.length === 2 && r.spy.calls.length === 0);
   r = await run({ status: 200, body: FIXTURE }, { status: 500, body: "x" });
   check("domain: a first answer with pulses ends the walk and is kept", r.t.net.calls.length === 1 && r.spy.calls.length === 1 && r.spy.calls[0][2].status === 200);
   r = await run({ status: 404, body: { detail: "Not found." } }, { status: 404, body: { detail: "Not found either." } });
-  check("domain: two 404s keep one of them, whole", r.spy.calls.length === 1 && r.spy.calls[0][2].status === 404 && bodyOf(r.spy.calls[0])?.detail === "Not found.");
+  check("domain: two 404s keep nothing", r.t.net.calls.length === 2 && r.spy.calls.length === 0);
   r = await run({ status: 404, body: { detail: "Not found." } }, { status: 403, body: { detail: "no" } });
   check("domain: a 404 then a 403 is a failed lookup and keeps nothing", r.spy.calls.length === 0);
 }
@@ -242,7 +272,7 @@ const ip = (id, addr) => ({ id, type: "infrastructure.ip_address", data: { ip_ad
   check("passive DNS: runs and keeps nothing", !(res instanceof Error) && t.net.calls.length > 0 && spy.calls.length === 0);
 }
 
-check("pack version is 1.4.0", pack.version === "1.4.0");
+check("pack version is 1.5.0", pack.version === "1.5.0");
 
 for (const n of ok) console.log(`ok   ${n}`);
 for (const n of fail) console.log(`FAIL ${n}`);

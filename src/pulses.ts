@@ -260,24 +260,16 @@ export const otxPulses = definePlugin({
             let pulses: Pulse[] = [];
             let broke = false;
             let throttled = false;
-            // The one response that IS the answer for this indicator, kept whole as OTX sent it. A
-            // 200 (with or without pulses) beats a 404, since a domain's second endpoint is only
-            // asked when the first said nothing; a 404 stands only when no endpoint answered.
+            // The one response kept for this indicator, whole as OTX sent it: the 200 that lists at
+            // least one pulse. Only one endpoint can be it, since the walk stops there.
             let answer: SafeResponse | null = null;
-            // A cancel between a domain's two endpoints leaves a 404 that may not be the answer.
-            let cut = false;
             for (const path of t.paths) {
-                if (ctx.signal?.aborted) {
-                    cut = true;
-                    break;
-                }
+                if (ctx.signal?.aborted) break;
                 try {
                     const res = await ctx.net.fetch(`${BASE}/${path}/general`, { method: 'GET', headers });
-                    // 404 is a real answer — OTX has never seen this indicator under this type.
-                    if (res.status === 404) {
-                        if (!answer) answer = res;
-                        continue;
-                    }
+                    // 404 is a real answer — OTX has never seen this indicator under this type —
+                    // and counts as a clean lookup, but it is not kept (see below).
+                    if (res.status === 404) continue;
                     // 429 is the anonymous rate limit, and it is NOT an empty result. Counting it as
                     // "nothing known" would turn a throttle into a false negative on every remaining
                     // node of the selection, which is the exact shape this plugin exists to avoid.
@@ -292,10 +284,10 @@ export const otxPulses = definePlugin({
                         break;
                     }
                     const doc = (await res.json()) as { pulse_info?: { count?: number; pulses?: Pulse[] } };
-                    answer = res;
                     const got = doc?.pulse_info?.pulses ?? [];
-                    if (got.length) {
+                    if (Array.isArray(got) && got.length) {
                         pulses = got;
+                        answer = res;
                         break;
                     }
                 } catch {
@@ -316,10 +308,15 @@ export const otxPulses = definePlugin({
             // copy of its own entry: a slice cut out of this response is no longer the answer OTX
             // gave, and the "reported in" edge already says where the Campaign came from (spec
             // §5-3). Kept whole, the answer also still holds the pulses the filter below drops,
-            // which no node carries. A throttled or failed lookup above keeps nothing: it says
-            // something about the account, not about the indicator. A 404 is kept — "OTX has
-            // never seen this" is itself a finding.
-            if (answer && !cut) await keep(ctx, ids[i], 'pulses', answer);
+            // which no node carries.
+            //
+            // Only an answer with at least one pulse is kept. A 404 and a 200 with
+            // pulse_info.count 0 were kept until 1.5.0 as "OTX has nothing on this", but they add
+            // nothing to the node: the analyst opened an empty review entry and a stored copy that
+            // said nothing (analyst's decision, 2026-11-25, reversing the earlier one). The run's
+            // summary still counts them as clean. A throttled or failed lookup above keeps nothing
+            // either: it says something about the account, not about the indicator.
+            if (answer) await keep(ctx, ids[i], 'pulses', answer);
             looked++;
             if (!pulses.length) {
                 clean++;
